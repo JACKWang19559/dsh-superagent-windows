@@ -2,8 +2,12 @@
   "name": "dsh-superagent",
   "author": "DeepSeek Harness Team <team@dsh.dev>",
   "license": "MIT",
-  "version": "0.1.0",
+  "version": "0.1.0-windows.1",
   "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/JACKWang19559/dsh-superagent-windows.git"
+  },
   "description": "A proactive agent for one GitHub repository, as a DSH (DeepSeek Harness) bundle: it listens to GitHub and optionally Feishu, evaluates requests under a Policy, turns authorized ones into Tickets, and executes each in its own DSH Session.",
   "type": "module",
   "main": "lib/index.js",
@@ -48,7 +52,11 @@
     "build": "tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "pnpm typecheck && pnpm test && pnpm build"
+    "check": "pnpm typecheck && pnpm test && pnpm build",
+    "test:windows": "vitest run tests/core-engine.spec.ts tests/policy.spec.ts tests/store.spec.ts tests/effects.spec.ts tests/http.spec.ts tests/bundle-patch.spec.ts tests/client.spec.tsx tests/windows-paths.spec.ts && vitest run tests/runtime.spec.ts -t \"Windows|refuses the main Session|restricts the main Session\"",
+    "test:windows-bundle": "node --test tests/windows-bundle.check.mjs",
+    "check:windows": "pnpm typecheck && pnpm test:windows && pnpm build && pnpm test:windows-bundle",
+    "bundle:windows": "node scripts/prepare-windows-bundle.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0",

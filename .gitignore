@@ -2,4 +2,19 @@ node_modules/
 lib/
 .artifacts/
 .env
+.env.*
+!.env.example
 coverage/
+
+# Machine-local installation artifacts and operational data.
+.superagent-state/
+.superagent-state.lock/
+superagent-desktop-bundle/
+.superagent-install/
+.dsh-acl-recovery/
+*.sqlite
+*.sqlite-*
+*.db
+*.db-*
+*.log
+*.tsbuildinfo

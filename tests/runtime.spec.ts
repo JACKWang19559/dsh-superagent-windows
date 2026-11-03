@@ -42,6 +42,7 @@ let directory: string
 let controller: { create: ReturnType<typeof vi.fn>; selectModel: ReturnType<typeof vi.fn>; resolveAgent: ReturnType<typeof vi.fn>; rename: ReturnType<typeof vi.fn>; prompt: ReturnType<typeof vi.fn>; inspect: ReturnType<typeof vi.fn> }
 type RegisteredTool = { name: string; output: { render: (args: unknown, result: unknown) => unknown }; execute: (args: unknown, execution: { signal: AbortSignal }) => Promise<unknown> }
 let tools: Map<string, Map<string, RegisteredTool>>
+let inheritedShell: 'bash' | 'pwsh'
 type Section = { name: string; text: (context: { signal?: AbortSignal }) => string; interpolate?: boolean }
 let sections: Map<string, Section>
 type Guard = (execution?: { name: string; arguments: unknown }) => string | undefined
@@ -135,6 +136,7 @@ async function acceptedTicket(trigger = feishu('1', '@bot 修一下回归')) {
   return { trigger, ticket, sessionId: `worker-${ticket.id}` }
 }
 beforeEach(async () => {
+  inheritedShell = 'bash'
   directory = mkdtempSync(join(tmpdir(), 'orchestrator-runtime-'))
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => args[1] === 'user' ? { login: 'agent-bot' } : args[1]?.includes('/pulls/') ? { state: 'open', user: { login: 'agent-bot' }, html_url: 'https://github.com/acme/widgets/pull/' + args[1].split('/').at(-1), head: { ref: `agent/${String(runtime.store.tickets.list()[0]?.execution?.name)}`, sha: 'head-1', repo: { full_name: 'acme/widgets' } } } : { default_branch: 'master', permissions: { push: true } })
   vi.spyOn(Commands.prototype, 'lark').mockResolvedValue({ users: [{ member_id: MEMBER, name: 'Alice' }], has_more: false })
@@ -164,7 +166,7 @@ beforeEach(async () => {
       if (agents.has(sessionId)) return
       const agentCtx = new Context()
       const preset = {}
-      const inherited = ['bash', 'read', 'read_image', 'skill', 'job_output', 'job_list', 'job_kill', 'grep', 'web_search',
+      const inherited = [inheritedShell, 'read', 'read_image', 'skill', 'job_output', 'job_list', 'job_kill', 'grep', 'web_search',
         'ask_user_question', 'plugin_manager', 'schedule_create', 'create_goal', 'session_create', 'session_send_message', 'feishu_doc_edit']
       const sessionTools = new Map<string, RegisteredTool>()
       tools.set(sessionId, sessionTools)
@@ -1527,6 +1529,25 @@ it('refuses the main Session a bash command that runs sleep and a long job wait,
   expect(guards.get(sessionId)!(bash('sleep 60'))).toBeUndefined()
   // The main Session's role says so.
   expect(masterPrompt).toContain('Worker reports, follow_up notices, new candidates and a background job\'s end, with its output, arrive by themselves as messages')
+})
+
+it('starts a Windows pwsh-only main Session and applies its foreground wait limits', async () => {
+  await runtime.stop()
+  agents.clear(); restricts.clear(); guards.clear()
+  inheritedShell = 'pwsh'
+  await (await restart()).ready
+  expect(restricts.get(runtime.masterId)).toEqual([{ allow: ['skill', 'pwsh', 'read', 'read_image', 'job_output', 'job_list', 'job_kill'] }])
+  const main = guards.get(runtime.masterId)!
+  const pwsh = (command: string, extra: Record<string, unknown> = {}) => ({ name: 'pwsh', arguments: { command, ...extra } })
+  for (const command of ['Start-Sleep -Seconds 30', 'Get-Date; sleep 60', 'while ($true) { Start-Sleep 5 }']) {
+    expect(main(pwsh(command)), command).toMatch(/^Reports/)
+  }
+  expect(main(pwsh("Write-Output 'sleep'"))).toBeUndefined()
+  expect(main(pwsh('Get-Date', { timeoutMs: 60_000 }))).toMatch(/^Reports/)
+  expect(main(pwsh('Get-Date', { timeoutMs: 20_000 }))).toBeUndefined()
+  ;(agents.get(runtime.masterId) as unknown as { session: { header: { agentPreset: string } } }).session.header = { agentPreset: 'standard' }
+  expect(main(pwsh('Get-Date'))).toMatch(/^This shell waits/)
+  expect(main(pwsh('Get-Date', { run_in_background: true }))).toBeUndefined()
 })
 
 it('reads the main Session\'s preset from a registry with or without presetForSession, and takes standard\'s caps when it cannot', async () => {

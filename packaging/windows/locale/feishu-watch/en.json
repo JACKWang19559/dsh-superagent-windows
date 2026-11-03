@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "SuperAgent Feishu",
+    "description": "Receives authorized chat requests through an optional Feishu bot."
+  }
+}

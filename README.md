@@ -1,4 +1,22 @@
-# dsh-superagent
+# SuperAgent for Windows — installation adaptation
+
+Community fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype), preserving the upstream source history and MIT license. This repository publishes the Windows Desktop installation work: path validation, PowerShell tool selection, reproducible bundle preparation, display resources and focused checks.
+
+**Experimental: installation and management entry points are verified; the complete native Windows worker execution chain is not supported yet.** Account probes, worker shims and preparation commands still contain Unix assumptions. See the explicit support boundaries before connecting a real repository.
+
+- [Windows 安装与限制（中文）](README.windows.md)
+- [Windows changes and verification](CHANGELOG.windows.md)
+- [MIT license](LICENSE)
+
+With Node.js 24, pnpm 11.7.0 and Windows PowerShell 5.1 (or PowerShell 7) available, run from this checkout:
+
+```powershell
+powershell -NoProfile -File scripts/build-windows.ps1
+```
+
+This builds, tests and prepares `.artifacts/windows-bundle` with its runtime dependencies. It prints the `plugin_manager` arguments for installation inside Harness; it does not edit a Harness profile. The generated directory is local to your machine and must not be committed. If you use Harness's bundled Node/pnpm, see the explicit executable parameters in the Windows guide.
+
+## Upstream research prototype
 
 > **Research prototype for reference only, not an official DeepSeek product.** This code grew out of our team's day-to-day development work, with much of the engineering done by coding agents. Treat it as research code, not production-ready software. It may still contain bugs, and its coding style and engineering practices may be inconsistent. Review and adapt it before using it in your own environment.
 >
