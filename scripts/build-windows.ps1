@@ -16,12 +16,12 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 if ($NodePath) {
     $nodeExecutable = (Resolve-Path -LiteralPath $NodePath).Path
 } else {
-    $nodeExecutable = (Get-Command node -CommandType Application -ErrorAction Stop).Source
+    $nodeExecutable = (Get-Command node -CommandType Application -ErrorAction Stop | Select-Object -First 1).Source
 }
 if ($PnpmScript) {
     $pnpmModule = (Resolve-Path -LiteralPath $PnpmScript).Path
 } else {
-    $pnpmCommand = (Get-Command pnpm -ErrorAction Stop).Source
+    $pnpmCommand = (Get-Command pnpm -ErrorAction Stop | Select-Object -First 1).Source
 }
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $projectRoot '.artifacts/windows-bundle' }
 if (-not [System.IO.Path]::IsPathRooted($OutputDirectory)) { $OutputDirectory = Join-Path $projectRoot $OutputDirectory }
