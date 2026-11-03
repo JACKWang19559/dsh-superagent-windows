@@ -44,11 +44,12 @@ export function ciFact(counts: { failed: number; running: number }): ThreadFact 
   return { label: 'CI', value: { zh: '通过', en: 'passed' } }
 }
 
-/** Reads a non-hidden file or directory listing from the repository's default branch via the GitHub API; hidden entries and `node_modules` are rejected. */
+/** Reads non-hidden source paths from the selected base branch (or repository default); hidden entries and node_modules are rejected. */
 export async function readRepositoryPath(commands: Commands, path: string, kind: 'file' | 'directory'): Promise<string> {
   const parts = path.split('/').filter(part => part && part !== '.')
   if (parts.some(part => part === '..' || part.startsWith('.') || part === 'node_modules')) throw new Error('Only non-hidden repository source paths are available')
-  const resource = `contents/${parts.map(encodeURIComponent).join('/')}`
+  const branch = commands.deployment.branch
+  const resource = `contents/${parts.map(encodeURIComponent).join('/')}${branch ? `?ref=${encodeURIComponent(branch)}` : ''}`
   if (kind === 'file') return commands.api(resource, '-H', 'Accept: application/vnd.github.raw')
   // GitHub returns an entry array for a directory and a single object for a file.
   const entries = await commands.api(z.union([z.array(z.looseObject({ name: z.string() })), z.looseObject({})]), resource)

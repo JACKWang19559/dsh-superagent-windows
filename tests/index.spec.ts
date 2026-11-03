@@ -2,13 +2,11 @@ import { expect, it, vi } from 'vitest'
 import { Config, type Machine } from '../src/deployment.ts'
 import { apply } from '../src/index.ts'
 
-// Stub Runtime to capture the resolved Machine settings and restart callback.
-const runtimes = vi.hoisted(() => [] as { machine: Machine; restart: () => void }[])
-vi.mock('../src/app/runtime.ts', () => ({ Runtime: class {
-  ready = Promise.resolve()
-  constructor(_ctx: unknown, readonly machine: Machine, readonly restart: () => void) { runtimes.push(this) }
-  configured() { return true }
-  async stop() {}
+// Capture the dormant controller's configuration without constructing a Runtime.
+const controls = vi.hoisted(() => [] as { machine: Machine; start: ReturnType<typeof vi.fn> }[])
+vi.mock('../src/on-demand/host.ts', () => ({ SuperagentControl: class {
+  start = vi.fn()
+  constructor(_ctx: unknown, readonly machine: Machine) { controls.push(this) }
 } }))
 /** Simulate the Cordis loader updating a volatile configuration reference in place. */
 const commit = (reference: unknown, value: unknown) => { (reference as Record<symbol, (value: unknown) => void>)[Symbol.for('cosmokit.volatile.write')]!(value) }
@@ -33,7 +31,7 @@ it('reads a limit DSH commits a new value of without a restart, and asks DSH to 
   const config = Config({ stateDir: '/srv/state', promptMaxChars: 5000 })
   await apply(ctx as never, config)
   expect(configure).toHaveBeenCalledExactlyOnceWith({ auto: false }, ctx.fiber)
-  const { machine } = runtimes.at(-1)!
+  const { machine } = controls.at(-1)!
   expect(machine.promptMaxChars.get()).toBe(5000)
   commit(config.promptMaxChars, 8000)
   expect(machine.promptMaxChars.get()).toBe(8000)
@@ -41,17 +39,12 @@ it('reads a limit DSH commits a new value of without a restart, and asks DSH to 
   expect(ctx.fiber.restart).not.toHaveBeenCalled()
 })
 
-it('asks DSH to read its settings entry again once a restart it started finished', async () => {
-  const { ctx, describe } = context()
-  let finish = () => {}
-  ctx.fiber.restart.mockImplementation(() => new Promise<void>(resolve => { finish = resolve }))
+it('mounts the Host controller without starting a repository or restarting its owner', async () => {
+  const { ctx } = context()
   await apply(ctx as never, Config({ stateDir: '/srv/state' }))
-  // Saving a Source account change restarts dsh-superagent, which re-runs setup and refreshes the settings descriptor.
-  runtimes.at(-1)!.restart()
-  await Promise.resolve()
-  expect(describe).not.toHaveBeenCalled()
-  finish()
-  await vi.waitFor(() => { expect(describe).toHaveBeenCalledTimes(1) })
+  expect(controls.at(-1)!.start).not.toHaveBeenCalled()
+  expect(ctx.fiber.restart).not.toHaveBeenCalled()
+  expect(ctx.logger.info).toHaveBeenCalledWith(expect.stringContaining('Superagent is idle'))
 })
 
 it('refuses keys of the previous configuration before registering anything', async () => {

@@ -1,13 +1,14 @@
 /** Plugin configuration and startup verification for repository access and agent CLI identities. */
 import { LIMITS } from './limits.ts'
 import { accessSync, constants, statSync } from 'node:fs'
-import { delimiter, isAbsolute, join } from 'node:path'
+import { delimiter, extname, isAbsolute, join } from 'node:path'
 import type { Volatile } from '@deepseek-ai/cordis'
 import s from '@deepseek-ai/schemastery'
 import { z } from 'zod'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import { runAsWorker, sameDirectory, withoutDirectory, workerBin } from './infra/environment.ts'
 import { SetupError } from './setup.ts'
+import { isValidBranch } from './on-demand/repository.ts'
 
 const reason = (error: unknown): string => error instanceof Error ? error.message : String(error)
 // Accept POSIX, drive-qualified Windows and UNC absolute paths in deployment settings.
@@ -24,6 +25,10 @@ export const Config = s.object({
 })
 export type DeploymentConfig = ReturnType<typeof Config>
 export interface Machine {
+  /** Internal on-demand binding; not a user-editable plugin configuration field. */
+  repositoryLock?: string
+  /** Internal on-demand branch binding; an empty string binds to the repository's default branch. */
+  branchLock?: string
   stateDir: string
   promptMaxChars: Volatile<number>
   admissionContextMaxPages: Volatile<number>
@@ -45,6 +50,7 @@ export function machineOf(config: DeploymentConfig): Machine {
 
 export const GithubAccountsSchema = z.object({
   repository: z.string().trim().regex(/^([A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?$/, 'owner/name').default(''),
+  branch: z.string().trim().refine(value => !value || isValidBranch(value), 'Use a valid Git branch name').default(''),
   cli: z.string().trim().default(''),
 })
 export const FeishuBotSchema = z.object({ cli: z.string().trim().default('') })
@@ -53,38 +59,53 @@ export const SETUP_FIELDS: Readonly<Record<string, readonly string[]>> = { githu
 
 export interface Deployment extends Machine {
   repository: string
+  /** Explicit, verified clone and new-PR base branch; omitted to use the repository default. */
+  branch?: string
   github: { cli: string; login: string; noreply: string }
   feishu?: FeishuBot
 }
 export interface FeishuBot { cli: string; appId: string; brand: 'feishu' | 'lark'; botId: string; name: string }
 
-/** Resolve a command name or absolute path to an executable file, ignoring the worker shim directory. */
-export function executable(name: string, path: string, exclude?: string): string {
-  if (name.includes('/') && !isAbsolute(name)) throw new Error(`${name} must be a command name or an absolute path`)
-  const candidates = isAbsolute(name) ? [name] : path.split(delimiter).filter(dir => isAbsolute(dir) && !(exclude && sameDirectory(dir, exclude))).map(dir => join(dir, name))
-  for (const candidate of candidates) {
-    try { if (statSync(candidate).isFile()) { accessSync(candidate, constants.X_OK); return candidate } }
+/** Resolve a command name or absolute path, excluding worker shims. Windows CLI configuration requires a native .exe or .com. */
+export function executable(name: string, path: string, exclude?: string, pathExt = process.env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD'): string {
+  const windows = process.platform === 'win32'
+  const absolute = (value: string): boolean => isAbsolute(value) && (!windows || /^(?:[A-Za-z]:[\\/]|(?:\\\\|\/\/)[^\\/]+[\\/][^\\/]+(?:[\\/]|$))/.test(value))
+  if (!absolute(name) && (windows ? /[\\/:]/.test(name) : name.includes('/'))) throw new Error(`${name} must be a command name or an absolute path`)
+  const extension = extname(name).toLowerCase()
+  if (windows && /\.(?:cmd|bat|ps1)$/.test(extension)) throw new Error(`${name} is a script; Windows CLI configuration requires a native .exe or .com executable`)
+  const extensions = windows ? [...new Set(pathExt.split(';').map(value => value.trim().toLowerCase()).filter(value => value === '.exe' || value === '.com'))] : []
+  const names = !windows || extension === '.exe' || extension === '.com' ? [name] : extensions.map(value => `${name}${value}`)
+  const directories = path.split(delimiter).map(dir => windows ? dir.replace(/^"(.*)"$/, '$1') : dir)
+  const bases = absolute(name) ? [''] : directories.filter(dir => absolute(dir) && !(exclude && sameDirectory(dir, exclude)))
+  for (const base of bases) for (const file of names) {
+    const candidate = base ? join(base, file) : file
+    if (exclude && sameDirectory(join(candidate, '..'), exclude)) continue
+    try { if (statSync(candidate).isFile()) { accessSync(candidate, windows ? constants.F_OK : constants.X_OK); return candidate } }
     catch { /* Not an executable file here; try the next PATH directory. */ }
   }
-  throw new Error(`${name} is not an executable file${isAbsolute(name) ? '' : ' on PATH'}`)
+  throw new Error(`${name} is not an executable file${absolute(name) ? '' : ' on PATH'}${windows ? ' (Windows requires a native .exe or .com)' : ''}`)
 }
 
-export type Probe = (argv: string[]) => Promise<string>
-/** Run startup checks through DSH's worker subprocess service with worker shims removed from PATH so a `gh` wrapper script reaches the real binary. */
-export function workerProbe(subprocess: SubprocessRuntime, stateDir: string, cwd: string, signal: AbortSignal): Probe {
-  const path = withoutDirectory(process.env.PATH ?? '', workerBin(stateDir))
-  return argv => runAsWorker(subprocess, ['env', `PATH=${path}`, ...argv], cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]))
+export type Probe = (argv: string[], env?: Record<string, string | undefined>) => Promise<string>
+/** Run startup checks with a per-process environment and worker shims removed from PATH. */
+export function workerProbe(subprocess: SubprocessRuntime, stateDir: string, cwd: string, signal: AbortSignal, env: Record<string, string | undefined> = {}): Probe {
+  return (argv, overlay) => {
+    const variables = { ...env, ...overlay }
+    const path = withoutDirectory(variables.PATH ?? process.env.PATH ?? '', workerBin(stateDir))
+    return runAsWorker(subprocess, argv, cwd, AbortSignal.any([signal, AbortSignal.timeout(60_000)]), { ...variables, PATH: path })
+  }
 }
 
 const GithubUser = z.object({ login: z.string().regex(/^[A-Za-z0-9-]+$/), id: z.number().int().positive() })
 const RepositoryAccess = z.object({ name: z.string().regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/), push: z.boolean().nullable() })
+const Branch = z.object({ name: z.string() })
 function parsed<T>(schema: z.ZodType<T>, text: string): T | undefined {
   let value: unknown
   try { value = JSON.parse(text) } catch { return undefined /* Non-JSON output; the caller surfaces the setup failure. */ }
   const result = schema.safeParse(value)
   return result.success ? result.data : undefined
 }
-/** Verify the agent's GitHub CLI identity and push access to the configured repository. */
+/** Verify the agent's GitHub CLI identity, repository push access, and any explicitly selected base branch. */
 export async function resolveDeployment(machine: Machine, github: unknown, probe: Probe, path = process.env.PATH ?? ''): Promise<Deployment> {
   const { stateDir } = machine
   const accounts = GithubAccountsSchema.parse(github ?? {})
@@ -103,7 +124,17 @@ export async function resolveDeployment(machine: Machine, github: unknown, probe
   if (!access) throw new SetupError('repositoryUnreported', { repository: remote })
   const repository = access.name
   if (access.push !== true) throw new SetupError('repositoryReadOnly', { account: agent.login, repository })
-  return { ...machine, repository, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
+  const branch = accounts.branch
+  if (branch) {
+    const values = { account: agent.login, repository, branch }
+    const text = await probe([cli, 'api', `repos/${repository}/branches/${encodeURIComponent(branch)}`]).catch((error: unknown) => {
+      throw new SetupError('branchUnreadable', { ...values, output: reason(error) })
+    })
+    const found = parsed(Branch, text)
+    if (found?.name !== branch) throw new SetupError('branchUnreadable', { ...values,
+      output: found ? `GitHub returned branch ${JSON.stringify(found.name)}; the requested branch must match exactly, including case.` : 'The agent GitHub CLI did not return a branch name.' })
+  }
+  return { ...machine, repository, ...branch ? { branch } : {}, github: { cli, login: agent.login, noreply: `${agent.id}+${agent.login}@users.noreply.github.com` } }
 }
 
 const AuthStatus = z.object({ appId: z.string().regex(/^cli_[A-Za-z0-9]+$/), brand: z.enum(['feishu', 'lark']).default('feishu'), identities: z.object({ bot: z.object({ status: z.string() }) }) })
@@ -118,7 +149,7 @@ export async function resolveFeishuBot(machine: Machine, feishu: unknown, probe:
   const fail = (error: unknown): never => { throw error instanceof SetupError ? error : new SetupError('feishuCliFailed', { output: reason(error) }) }
   let cli = ''
   try { cli = executable(name, path, workerBin(machine.stateDir)) } catch (error) { fail(error) }
-  const run = (...args: string[]): Promise<string> => probe(['env', 'LARKSUITE_CLI_NO_UPDATE_NOTIFIER=1', 'LARKSUITE_CLI_NO_SKILLS_NOTIFIER=1', cli, ...args]).catch(fail)
+  const run = (...args: string[]): Promise<string> => probe([cli, ...args], { LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' }).catch(fail)
   const text = await run('auth', 'status')
   const status = parsed(AuthStatus, text.slice(text.indexOf('{')))
   if (!status) return fail(new SetupError('feishuNoApp'))

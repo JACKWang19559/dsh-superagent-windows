@@ -59,7 +59,7 @@ export interface HttpHost {
  * Route handlers throw it when request bodies are malformed or target records are missing, and registerHttp serializes its status and message in the HTTP response.
  */
 class RouteError extends Error { constructor(readonly status: 400 | 404, message: string) { super(message) } }
-async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<unknown> {
+export async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<unknown> {
   let size = 0; const chunks: Buffer[] = []
   for await (const chunk of req) {
     const bytes = Buffer.from(chunk); size += bytes.length
@@ -69,7 +69,7 @@ async function readBody(req: IncomingMessage, maxBytes = 128 * 1024): Promise<un
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')) as unknown }
   catch { throw new RouteError(400, 'The request body is not JSON') }
 }
-function json(res: ServerResponse, status: number, value: unknown): void {
+export function json(res: ServerResponse, status: number, value: unknown): void {
   res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' }); res.end(JSON.stringify(value))
 }
 export function sameOrigin(req: Pick<IncomingMessage, 'headers'>, port: number): boolean {
@@ -231,7 +231,7 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
   if (ctx.webServer.host !== '127.0.0.1') throw new Error('Orchestrator management requires a loopback Web server')
   const table = routes(runtime)
   const disposers = [
-    ctx.webServer.register({ kind: 'prefix', path: '/orchestrator', handler: async (req, res) => {
+    ctx.webServer.register({ kind: 'prefix', path: '/orchestrator/api/', handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
       if (!sameOrigin(req, ctx.webServer.port)) { json(res, 403, { error: 'Same-origin management request required' }); return }

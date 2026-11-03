@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Superagent 按需控制台",
+    "description": "明确启动后同步指定 GitHub 仓库，由 Harness 内置 Agent 执行；可查询状态或停止轮询与工作会话。选择预设后先保持待机。"
+  }
+}

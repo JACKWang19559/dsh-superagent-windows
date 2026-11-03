@@ -10,6 +10,21 @@
     - id: dsh-superagent-feishu
       name: dsh-superagent/feishu-watch
       disabled: true
+    # Public control session: registration and selection do not activate the repository Runtime.
+    - id: preset-superagent
+      name: '@deepseek-ai/dsh-agent-preset'
+      config:
+        id: superagent
+        name: Superagent · 按需启动
+        description: 主动启动 GitHub 仓库编排，使用 Harness 内置 Agent；选择预设后先待机，启动时才检查账号与同步。
+        order: 10
+        plugins:
+          - id: persona
+            name: '@deepseek-ai/dsh-persona'
+            config:
+              prefix: You are the Superagent startup assistant powered by the {{model}} model.
+          - id: superagent-control
+            name: dsh-superagent/on-demand
     # The agent preset of every Executor Session (WORKER_PRESET in src/app/sessions.ts); the main Session has its own, below.
     # It is DSH's `standard` preset with only what a worker needs, and a shell whose foreground command moves to a background job
     # after 5 seconds, so a long command does not hold back a person's message, which the Session takes at its next step. Left

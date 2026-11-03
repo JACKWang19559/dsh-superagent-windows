@@ -1,8 +1,10 @@
-# SuperAgent for Windows — installation adaptation
+# SuperAgent for Windows — on-demand Harness Agents
 
-Community fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype), preserving the upstream source history and MIT license. This repository publishes the Windows Desktop installation work: path validation, PowerShell tool selection, reproducible bundle preparation, display resources and focused checks.
+Community fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype), preserving the upstream source history and MIT license. **`0.1.0-windows.3` stays idle until explicitly started.** Select **Superagent · 按需启动** in Harness, enter a GitHub repository or branch URL, and start it when needed. Orchestrator and worker sessions use Harness built-in Agents.
 
-**Experimental: installation and management entry points are verified; the complete native Windows worker execution chain is not supported yet.** Account probes, worker shims and preparation commands still contain Unix assumptions. See the explicit support boundaries before connecting a real repository.
+The launcher accepts `owner/repo`, `/owner/repo`, repository URLs and branch URLs such as `https://github.com/owner/repo/tree/codex/video-editing`. Explicit branches are checked on startup and used for repository reads and new ticket workspaces. The internal router and worker modes are hidden from the new-session picker. Stop the current target before switching repositories or branches.
+
+Native Windows account discovery, PowerShell worker shims and Git preparation are covered by automated tests, including actual local branch cloning. **This remains an experimental research fork:** real GitHub-to-worker end-to-end execution and full upstream Windows test coverage have not been verified. See the Windows guide for the supported environment and remaining limitations.
 
 - [Windows 安装与限制（中文）](README.windows.md)
 - [Windows changes and verification](CHANGELOG.windows.md)
@@ -11,10 +13,12 @@ Community fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deep
 With Node.js 24, pnpm 11.7.0 and Windows PowerShell 5.1 (or PowerShell 7) available, run from this checkout:
 
 ```powershell
-powershell -NoProfile -File scripts/build-windows.ps1
+powershell -NoProfile -File scripts/build-windows.ps1 -OutputDirectory '.artifacts/windows-bundle-v3'
 ```
 
-This builds, tests and prepares `.artifacts/windows-bundle` with its runtime dependencies. It prints the `plugin_manager` arguments for installation inside Harness; it does not edit a Harness profile. The generated directory is local to your machine and must not be committed. If you use Harness's bundled Node/pnpm, see the explicit executable parameters in the Windows guide.
+This builds, tests and prepares a new installation directory with its runtime dependencies. It prints the `plugin_manager` arguments for installation inside Harness; it does not edit a Harness profile. Keep the generated directory local and use a fresh directory for each upgrade. If you use Harness's bundled Node/pnpm, see the explicit executable parameters in the Windows guide.
+
+After upgrading a linked bundle on Desktop `0.2.1-rc.5`, fully quit Harness from its application or tray menu and reopen it. A page refresh does not clear the cached client bundle. Cold startup remains idle.
 
 ## Upstream research prototype
 
@@ -32,7 +36,7 @@ Setup has many steps, so an agent does it with you. Ask your coding agent:
 
 > Read SETUP.md in this repository and set up dsh-superagent with me.
 
-It asks one short question at a time, shows the full plan once, and then installs and configures everything. [SETUP.md](SETUP.md) is what it follows.
+[SETUP.md](SETUP.md) guides installation, explicit startup, repository and branch selection, Policy configuration, and stopping the service. It reuses choices you have already supplied and asks only for information needed by the next action.
 
 ## Documentation
 

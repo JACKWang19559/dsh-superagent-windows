@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { key, liveTicket, type Ticket } from '../core/index.ts'
 import { mandateInstructions, ticketOfSession } from '../executor/dsh.ts'
 import type { HealthEntry } from '../infra/health.ts'
+import { shellEnvironmentPrefix } from '../infra/environment.ts'
 import { AgentDelivery, messageId } from './delivery.ts'
 import type { Effects } from './effects.ts'
 import type { Variable } from './execution-environment.ts'
@@ -34,6 +35,8 @@ export interface SessionsHost {
   closing(): boolean
   /** Execution environment variables for `ticket`, rendered into its worker's system prompt. */
   environment(ticket: Ticket): Variable[]
+  /** Account and ticket variables applied to this managed agent's shell only. */
+  executionEnvironment(ticket?: Ticket): Record<string, string | undefined>
   /** Tools to register on the main Session (`ticket === undefined`) or on `ticket`'s worker Session. */
   tools(agent: Agent, ticket?: Ticket): Tool[]
 }
@@ -270,6 +273,23 @@ export class Sessions {
       // An Executor Session keeps the profile's work tools it has, which DSH requires to be known; its own tools are not masked.
       binding.disposers.push(...this.workOnly(agent, ticket!.id))
     }
+    this.bindEnvironment(agent, binding, ticket?.id)
+  }
+  /** Wrap only the managed agent's inherited shell; permission checks, cancellation and job ownership remain with the original tool. */
+  private bindEnvironment(agent: Agent, binding: SessionBinding, ticketId?: string): void {
+    const parent = scopeParentOf(agent)
+    for (const shell of ['bash', 'pwsh'] as const) {
+      const original = agent.ctx.tools.get(shell, parent)
+      if (!original?.execute) continue
+      binding.disposers.push(agent.ctx.tools.register({ ...original, execute: (args, execution) => {
+        if (!args || typeof args !== 'object' || !('command' in args) || typeof args.command !== 'string') {
+          return original.execute(args, execution)
+        }
+        const ticket = ticketId ? this.host.store.tickets.get(ticketId) : undefined
+        const command = shellEnvironmentPrefix(shell, this.host.executionEnvironment(ticket)) + args.command
+        return original.execute({ ...args, command }, execution)
+      } }))
+    }
   }
   /**
    * Whether a Session runs the router preset: as DSH's preset registry last selected it, read through the session projection
@@ -312,7 +332,9 @@ export class Sessions {
     }
     const ticketId = parent === undefined ? undefined : ticketOfSession(parent)
     if (ticketId === undefined || !this.host.store.tickets.get(ticketId)) return
-    this.bindings.set(agent, { disposers: this.workOnly(agent, ticketId), subagent: true })
+    const binding: SessionBinding = { disposers: this.workOnly(agent, ticketId), subagent: true }
+    this.bindings.set(agent, binding)
+    this.bindEnvironment(agent, binding, ticketId)
   }
   /** Register the skills of a prompt version in the agent's skill scope, in place of an earlier version's. */
   private bindSkills(binding: SessionBinding, version: PromptVersion): void {

@@ -2,13 +2,13 @@
   "name": "dsh-superagent",
   "author": "DeepSeek Harness Team <team@dsh.dev>",
   "license": "MIT",
-  "version": "0.1.0-windows.1",
+  "version": "0.1.0-windows.3",
   "private": true,
   "repository": {
     "type": "git",
     "url": "git+https://github.com/JACKWang19559/dsh-superagent-windows.git"
   },
-  "description": "A proactive agent for one GitHub repository, as a DSH (DeepSeek Harness) bundle: it listens to GitHub and optionally Feishu, evaluates requests under a Policy, turns authorized ones into Tickets, and executes each in its own DSH Session.",
+  "description": "On-demand Superagent for DeepSeek Harness: explicitly start one GitHub repository, admit requests under a Policy, and execute each Ticket with Harness built-in Agents. Stays idle until started.",
   "type": "module",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
@@ -18,6 +18,10 @@
       "default": "./lib/index.js"
     },
     "./client": "./lib/client.js",
+    "./on-demand": "./lib/on-demand.js",
+    "./on-demand/locale/*.json": "./packaging/windows/locale/on-demand/*.json",
+    "./on-demand/icon": "./packaging/windows/icon.svg",
+    "./icon": "./packaging/windows/icon.svg",
     "./github-watch": "./lib/github-watch.js",
     "./feishu-watch": "./lib/feishu-watch.js",
     "./package.json": "./package.json",
@@ -27,7 +31,12 @@
     "lib",
     "cordis.patch.yml",
     "locale/*.json",
+    "packaging/windows/icon.svg",
+    "packaging/windows/locale/on-demand/*.json",
     "README.md",
+    "README.windows.md",
+    "CHANGELOG.windows.md",
+    "SETUP.md",
     "prompts",
     "skills"
   ],
@@ -53,7 +62,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm test && pnpm build",
-    "test:windows": "vitest run tests/core-engine.spec.ts tests/policy.spec.ts tests/store.spec.ts tests/effects.spec.ts tests/http.spec.ts tests/bundle-patch.spec.ts tests/client.spec.tsx tests/windows-paths.spec.ts && vitest run tests/runtime.spec.ts -t \"Windows|refuses the main Session|restricts the main Session\"",
+    "test:windows": "vitest run tests/core-engine.spec.ts tests/policy.spec.ts tests/store.spec.ts tests/effects.spec.ts tests/http.spec.ts tests/bundle-patch.spec.ts tests/client.spec.tsx tests/windows-paths.spec.ts tests/on-demand.spec.ts tests/repository-input.spec.ts tests/github-branch.spec.ts tests/launcher.spec.tsx tests/preset-picker.spec.tsx tests/windows-execution.spec.ts && vitest run tests/runtime.spec.ts -t \"Windows|refuses the main Session|restricts the main Session\"",
     "test:windows-bundle": "node --test tests/windows-bundle.check.mjs",
     "check:windows": "pnpm typecheck && pnpm test:windows && pnpm build && pnpm test:windows-bundle",
     "bundle:windows": "node scripts/prepare-windows-bundle.mjs"

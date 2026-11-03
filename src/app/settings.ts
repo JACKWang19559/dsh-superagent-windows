@@ -54,6 +54,9 @@ const BLOCKS: Record<'policy' | 'eval' | 'executor' | 'source', Block> = {
 
 /** Host dependencies used by `Settings`. */
 export interface SettingsHost {
+  /** A launcher-owned repository can only be switched by stopping and starting another namespace. */
+  readonly repositoryLock?: string
+  readonly branchLock?: string
   readonly store: Pick<Store, 'settings' | 'saveSettings' | 'blockRevision' | 'atomic' | 'tickets' | 'get'>
   readonly sources: SourceRegistry
   /** Notified when a settings save changes the policy version. */
@@ -164,6 +167,12 @@ export class Settings {
       catch (error) { throw new UserError('modelUnavailable', { block, error: error instanceof Error ? error.message : String(error) }) }
     }
     rules.guard?.(current, candidate, origin)
+    if (this.host.repositoryLock && String(candidate.sources.github?.config.repository ?? '').toLowerCase() !== this.host.repositoryLock.toLowerCase()) {
+      throw new SettingsConflict('Stop Superagent and start the other repository from the launcher; this running instance is bound to ' + this.host.repositoryLock + '.')
+    }
+    if (this.host.branchLock !== undefined && String(candidate.sources.github?.config.branch ?? '') !== this.host.branchLock) {
+      throw new SettingsConflict('Stop Superagent and select the other branch from the launcher; this running instance is bound to its selected branch.')
+    }
     if (setupChanged(current, candidate)) await this.host.setup.checkAccounts(block, candidate)
     if (stale()) throw new SettingsConflict('Settings changed during the checks. Reload before saving.')
     // Re-read current settings after async checks in case unrelated blocks were saved concurrently.

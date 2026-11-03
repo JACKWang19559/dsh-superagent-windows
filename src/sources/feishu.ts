@@ -128,8 +128,11 @@ export const feishuKind: SourceKind<FeishuConfig> = {
 export const feishuSettings = (sources: SourceRegistry): FeishuConfig => sources.instance<FeishuConfig>(SOURCE)?.config ?? FeishuConfigSchema.parse({})
 
 export const name = 'dsh-superagent-feishu'
-export const inject = ['orchestrator']
 export function apply(ctx: Context): void {
+  // Stay installable while dormant; the injected child owns the active listener lifetime.
+  ctx.inject(['orchestrator'], mount)
+}
+function mount(ctx: Context): void {
   ctx.effect(() => ctx.orchestrator.sources.register(feishuKind), 'feishu: source kind')
   ctx.effect(() => {
     const controller = new AbortController()

@@ -26,10 +26,45 @@ const flat = (rows: readonly Row[]): Row[] => rows.flatMap(row => [row, ...Array
 const presetOf = (rows: readonly Row[], id: string) => rows.map(row => row.config as { id?: string; order?: number; plugins: Row[] })
   .find(config => config?.id === id)!
 
+it('defines the selectable on-demand console separately from the internal router and worker presets', async () => {
+  const rows = await patched()
+  const control = presetOf(rows, 'superagent')
+  expect(control).toMatchObject({ id: 'superagent', name: 'Superagent · 按需启动', order: 10 })
+  expect(flat(control.plugins).map(row => row.name)).toEqual(['@deepseek-ai/dsh-persona', 'dsh-superagent/on-demand'])
+  expect(rows.some(row => row.name === 'dsh-superagent/on-demand')).toBe(false)
+  expect(presetOf(rows, WORKER_PRESET).order).toBeGreaterThan(control.order!)
+  expect(presetOf(rows, ROUTER_PRESET).order).toBeGreaterThan(control.order!)
+  expect(rows.find(row => row.id === 'dsh-superagent-feishu')?.disabled).toBe(true)
+})
+
+it('exports the on-demand entry and packaged bilingual display resources in windows.3', () => {
+  const root = join(import.meta.dirname, '..')
+  const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
+  expect(manifest.version).toBe('0.1.0-windows.3')
+  expect(manifest.exports['./on-demand']).toBe('./lib/on-demand.js')
+  const pattern = manifest.exports['./on-demand/locale/*.json'] as string
+  expect(manifest.files).toContain(pattern.replace(/^\.\//, ''))
+  for (const locale of ['en', 'zh']) {
+    const value = JSON.parse(readFileSync(join(root, pattern.replace('*', locale)), 'utf8'))
+    expect(value.meta.title).toMatch(/Superagent/)
+    expect(value.meta.description).toMatch(/Harness/)
+    expect(value.meta.description).toMatch(/GitHub/)
+  }
+  const icon = manifest.exports['./on-demand/icon'] as string
+  expect(manifest.files).toContain(icon.replace(/^\.\//, ''))
+  const svg = readFileSync(join(root, icon), 'utf8')
+  expect(svg).toContain('<svg xmlns="http://www.w3.org/2000/svg"')
+  expect(Buffer.byteLength(svg)).toBeLessThanOrEqual(256 * 1024)
+  for (const test of ['tests/on-demand.spec.ts', 'tests/launcher.spec.tsx', 'tests/windows-execution.spec.ts']) {
+    expect(manifest.scripts['test:windows'].split(' && ')[0]).toContain(test)
+  }
+  expect(manifest.scripts['test:windows']).toContain('vitest run tests/runtime.spec.ts -t "Windows|refuses the main Session|restricts the main Session"')
+})
+
 it('defines the worker preset Executor Sessions run under, with a shell that moves long commands to the background', async () => {
   const rows = await patched()
-  expect(rows.map(row => row.id)).toEqual(['dsh-superagent', 'dsh-superagent-github', 'dsh-superagent-feishu', 'dsh-superagent-worker-preset',
-    'dsh-superagent-router-preset'])
+  expect(rows.map(row => row.id)).toEqual(['dsh-superagent', 'dsh-superagent-github', 'dsh-superagent-feishu', 'preset-superagent',
+    'dsh-superagent-worker-preset', 'dsh-superagent-router-preset'])
   const preset = presetOf(rows, WORKER_PRESET)
   expect(preset.id).toBe(WORKER_PRESET)
   const plugins = flat(preset.plugins)

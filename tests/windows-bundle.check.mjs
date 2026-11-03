@@ -6,7 +6,7 @@ import { test } from 'node:test';
 import { prepareWindowsBundle, SOURCE_DIRECTORY, TESTED_PEERS } from '../scripts/prepare-windows-bundle.mjs';
 import { checkBundleImports } from '../scripts/check-bundle-import.mjs';
 
-async function fixture(t, { missingClient = false, duplicateRow = false } = {}) {
+async function fixture(t, { missingEntry, duplicateRow = false } = {}) {
   const root = await mkdtemp(join(tmpdir(), 'superagent-bundle-'));
   t.after(async () => {
     assert.equal(dirname(resolve(root)), resolve(tmpdir()));
@@ -16,13 +16,14 @@ async function fixture(t, { missingClient = false, duplicateRow = false } = {}) 
   const source = join(root, 'source 项目');
   await mkdir(source);
   for (const path of ['lib', 'prompts', 'skills', 'locale', 'node_modules', '.git', '.superagent-state']) await mkdir(join(source, path));
-  for (const name of ['index.js', 'github-watch.js', 'feishu-watch.js', ...missingClient ? [] : ['client.js']]) {
+  for (const name of ['index.js', 'client.js', 'on-demand.js', 'github-watch.js', 'feishu-watch.js'].filter(name => name !== missingEntry)) {
     await writeFile(join(source, 'lib', name), 'export {};\n');
   }
   for (const name of ['package.json', 'LICENSE', 'README.md']) await cp(join(SOURCE_DIRECTORY, name), join(source, name));
   await cp(join(SOURCE_DIRECTORY, 'packaging'), join(source, 'packaging'), { recursive: true });
-  const row = '- insert:\n    - id: dsh-superagent\n      name: dsh-superagent\n';
-  await writeFile(join(source, 'cordis.patch.yml'), (duplicateRow ? row + row : row).replaceAll('\n', '\r\n'));
+  const patch = (await readFile(join(SOURCE_DIRECTORY, 'cordis.patch.yml'), 'utf8')).replaceAll('\r\n', '\n');
+  const duplicate = '- insert:\n    - id: dsh-superagent\n      name: dsh-superagent\n';
+  await writeFile(join(source, 'cordis.patch.yml'), (patch + (duplicateRow ? duplicate : '')).replaceAll('\n', '\r\n'));
   await writeFile(join(source, '.env'), 'DUMMY_TEST_ONLY=not-a-credential\n');
   await writeFile(join(source, '.superagent-state', 'example.sqlite'), 'test fixture only');
   return { root, source, target: join(root, 'output 安装包'), state: join(root, 'state # data') };
@@ -37,10 +38,17 @@ test('prepares a CRLF checkout with Unicode paths, metadata and runtime peers wi
   assert.equal(manifest.scripts, undefined);
   assert.equal(manifest.devDependencies, undefined);
   assert.equal(manifest.license, 'MIT');
+  assert.equal(manifest.version, '0.1.0-windows.3');
+  assert.equal(manifest.exports['./on-demand'], './lib/on-demand.js');
+  assert.ok((await stat(join(target, 'lib', 'on-demand.js'))).isFile());
   assert.equal(await readFile(join(target, 'LICENSE'), 'utf8'), await readFile(join(source, 'LICENSE'), 'utf8'));
   const patch = await readFile(join(target, 'cordis.patch.yml'), 'utf8');
   assert.equal(JSON.parse(patch.match(/stateDir: (.+)/)[1]), state.replaceAll('\\', '/'));
-  for (const name of ['github-watch', 'feishu-watch']) {
+  assert.match(patch, /id: preset-superagent/);
+  assert.match(patch, /name: dsh-superagent\/on-demand/);
+  for (const name of ['on-demand', 'github-watch', 'feishu-watch']) {
+    assert.equal(manifest.exports[`./${name}/locale/*.json`], `./locale/${name}/*.json`);
+    assert.equal(manifest.exports[`./${name}/icon`], './icon.svg');
     assert.ok((await stat(join(target, manifest.exports[`./${name}/icon`]))).isFile());
     for (const locale of ['en', 'zh']) {
       const metadata = JSON.parse(await readFile(join(target, 'locale', name, `${locale}.json`), 'utf8'));
@@ -80,10 +88,33 @@ test('rejects relative state paths and output/state layouts that would mix insta
   assert.equal(await stat(target).catch(() => null), null);
 });
 
-test('fails before creating output when a required build artifact is missing', async t => {
-  const { source, target, state } = await fixture(t, { missingClient: true });
-  await assert.rejects(prepareWindowsBundle({ sourceDir: source, outputDir: target, stateDir: state }), /Missing lib\/client.js/);
+for (const missingEntry of ['client.js', 'on-demand.js']) test(`fails before creating output without ${missingEntry}`, async t => {
+  const { source, target, state } = await fixture(t, { missingEntry });
+  await assert.rejects(prepareWindowsBundle({ sourceDir: source, outputDir: target, stateDir: state }),
+    error => error.message.includes(`Missing lib/${missingEntry}`));
   assert.equal(await stat(target).catch(() => null), null);
+});
+
+test('requires localized on-demand metadata before creating output', async t => {
+  const { source, target, state } = await fixture(t);
+  await writeFile(join(source, 'packaging', 'windows', 'locale', 'on-demand', 'zh.json'), JSON.stringify({ meta: { title: 'Superagent' } }));
+  await assert.rejects(prepareWindowsBundle({ sourceDir: source, outputDir: target, stateDir: state }), /Incomplete display metadata for on-demand\/zh/);
+  assert.equal(await stat(target).catch(() => null), null);
+});
+
+test('import smoke checks load the on-demand entry without activating it', async t => {
+  const { source, target, state } = await fixture(t);
+  for (const name of ['index.js', 'github-watch.js', 'feishu-watch.js']) {
+    await writeFile(join(source, 'lib', name), 'export function apply() { throw new Error("must not activate"); }\nexport const Config = value => value;\n');
+  }
+  await writeFile(join(source, 'lib', 'on-demand.js'), 'throw new Error("on-demand import reached");\n');
+  await prepareWindowsBundle({ sourceDir: source, outputDir: target, stateDir: state });
+  const manifest = JSON.parse(await readFile(join(target, 'package.json'), 'utf8'));
+  for (const [name, version] of Object.entries({ ...manifest.dependencies, ...manifest.peerDependencies })) {
+    await mkdir(join(target, 'node_modules', name), { recursive: true });
+    await writeFile(join(target, 'node_modules', name, 'package.json'), JSON.stringify({ name, version }));
+  }
+  await assert.rejects(checkBundleImports(target), /on-demand import reached/);
 });
 
 test('refuses an ambiguous patch before creating output', async t => {

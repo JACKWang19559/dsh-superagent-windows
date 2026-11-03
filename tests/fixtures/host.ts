@@ -5,8 +5,9 @@
 import { Context } from '@deepseek-ai/cordis'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { vi, type Mock } from 'vitest'
+import type { SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { Runtime } from '../../src/app/runtime.ts'
 import { Store } from '../../src/app/store.ts'
@@ -134,7 +135,8 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
 /** @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored. */
 export async function startRuntime(seed?: (store: Store) => void) {
   const directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))
-  const AGENT = join(directory, 'agent-gh'), BOT = join(directory, 'lark-bot')
+  const extension = process.platform === 'win32' ? '.exe' : ''
+  const AGENT = join(directory, `agent-gh${extension}`), BOT = join(directory, `lark-bot${extension}`)
   const repository = { default_branch: 'master', permissions: { push: true } }
   vi.spyOn(Commands.prototype, 'gh').mockImplementation(async args => args[1] === 'user' ? { login: 'agent-bot' } : repository)
   vi.spyOn(Commands.prototype, 'lark').mockResolvedValue({ users: [{ member_id: MEMBER, name: 'Alice' }], has_more: false })
@@ -150,14 +152,20 @@ export async function startRuntime(seed?: (store: Store) => void) {
     ['git config -z --show-origin --get-all credential.https://github.com.helper']: `file:${workerGitConfig(directory)}\0${credentialHelper(AGENT)}\0`,
     [scoped]: `global\0credential.helper\n\0global\0credential.https://github.com.helper\n${credentialHelper(AGENT)}\0`,
   }
-  /** A prepare command (`sh -c`) waits for this while it is set. */
+  /** A native prepare shell waits for this while it is set, or finishes when its execution is aborted. */
   const hooks: { prepare?: Promise<void> } = {}
-  const subprocess = { spawn: vi.fn((spec: { argv: readonly string[] }) => {
+  const subprocess = { spawn: vi.fn((spec: SubprocessSpawnSpec) => {
     const argv = [...spec.argv]
-    while (argv[0] === 'env' || /^[A-Z_]+=/.test(argv[0] ?? '')) argv.shift()
     const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
     const exited = { exitCode: 0, signal: null }
-    const done = argv[0] === 'sh' && hooks.prepare ? hooks.prepare.then(() => exited) : Promise.resolve(exited)
+    const shell = basename(argv[0] ?? '').toLowerCase()
+    const preparing = shell === 'sh' || shell === 'powershell.exe'
+    const done = preparing && hooks.prepare ? new Promise<{ exitCode: number | null; signal: string | null }>((resolve, reject) => {
+      const abort = () => { resolve({ exitCode: null, signal: 'SIGTERM' }) }
+      if (spec.signal?.aborted) { abort(); return }
+      spec.signal?.addEventListener('abort', abort, { once: true })
+      void hooks.prepare!.then(() => { resolve(exited) }, reject).finally(() => { spec.signal?.removeEventListener('abort', abort) })
+    }) : Promise.resolve(exited)
     return { done, collected: { stdout: reader(answers[argv.join(' ')] ?? ''), stderr: reader('') } }
   }) }
   const agents = new Map<string, FakeAgent>()
@@ -288,7 +296,11 @@ export async function startRuntime(seed?: (store: Store) => void) {
     await http(req, { writeHead: (code: number) => { status = code }, end: (data: string) => { text = data } })
     return { status, body: JSON.parse(text) as Record<string, unknown> }
   }
-  async function stop() { await runtime.stop(); vi.restoreAllMocks(); rmSync(directory, { recursive: true, force: true }) }
+  async function stop() {
+    await runtime.stop(); vi.restoreAllMocks()
+    if (dirname(resolve(directory)) !== resolve(tmpdir()) || !basename(directory).startsWith('orchestrator-host-')) throw new Error('Unexpected host fixture directory')
+    rmSync(directory, { recursive: true, force: true })
+  }
   /** The Session's model takes its next step, which takes the messages steered in since its last. */
   const step = (sessionId: string) => { steps.get(sessionId)!() }
   /** A step of the worker claims what waits for it, and is cut off before the Session took it. */

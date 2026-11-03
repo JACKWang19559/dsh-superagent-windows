@@ -18,7 +18,7 @@ export async function checkBundleImports(directory) {
     assert.equal(local.name, name);
     assert.equal(local.version, version, `Installed version of ${name}`);
   }
-  for (const name of ['index.js', 'github-watch.js', 'feishu-watch.js']) {
+  for (const name of ['index.js', 'on-demand.js', 'github-watch.js', 'feishu-watch.js']) {
     const entry = await import(pathToFileURL(join(directory, 'lib', name)).href);
     assert.equal(typeof entry.apply, 'function', `${name} must export apply`);
     if (name === 'index.js') {

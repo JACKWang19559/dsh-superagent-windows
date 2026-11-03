@@ -290,7 +290,13 @@ Some generic modules still refer directly to GitHub or Feishu:
 
 | Path | Responsibility |
 | --- | --- |
-| `src/index.ts` | The main plugin entry: reads the machine settings, starts the Runtime, and gives it the restart that a save of a Source's account uses |
+| `src/index.ts` | The main plugin entry: reads the machine settings and registers the idle Host supervisor and local launch endpoint; only an explicit start creates a repository Runtime |
+| `src/on-demand/repository.ts` | Shared owner/repo and GitHub branch-link parsing, Git ref validation, canonical inputs and case-sensitive branch identity; no network calls |
+| `src/on-demand/types.ts` | The shared `LaunchStatus`, `LaunchRequest` and `LaunchControl` contracts for the Host, control tool and client |
+| `src/on-demand/controller.ts` | `Launcher`: validates repository and action inputs, serializes start and stop, handles cancellation and failures, and exposes idle status without starting work |
+| `src/on-demand/host.ts` | `SuperagentControl`: creates one Runtime in its repository's hashed state directory, seeds new settings and the clone/branch prepare command, remembers the last repository without auto-resuming, and disposes the Runtime on stop |
+| `src/on-demand/http.ts` | The always-available `/orchestrator/control` status and action endpoint, same-origin and argument checks, and the dispatch shared with the control tool |
+| `src/on-demand/preset.ts` | The `./on-demand` preset plugin: registers startup guidance and the scoped `superagent_control` tool, requires the control session already to have Full access for start, and does not activate a repository on selection |
 | `src/deployment.ts` | The plugin `Config` and `Machine`; `resolveDeployment` and `resolveFeishuBot` read the repository and the accounts from the Source settings, each CLI run as Executor shells run it; `SETUP_FIELDS` lists the Source fields setup reads. The code names no person, account or organization |
 | `src/setup.ts` | Setup problems: `SetupError`, with a code, the place that fixes it and the English text the log, the main Session and the panel share |
 | `src/policy.ts` | The Policy: the settings schemas by block, the Policy version, the gate and Mandate revalidation |
@@ -375,6 +381,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
 | `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
+| `src/client/launch-control.ts` | `useLaunchControl`: validates launch responses, polls local status, submits explicit actions, ignores stale requests, reconciles failures and cleans up polling on unmount |
+| `src/client/preset-picker.tsx` | Delegates the public new-session Slot to the shipped picker while filtering the two internal Superagent presets; preserves the Host registry and restores the original on unload |
+| `src/client/launcher.tsx` | The on-demand panel entry: repository input, start/stop controls, lifecycle and permission copy, the link to the separate main Session, and the existing panel while its Runtime is available |
 | `src/client/app.tsx` | The panel: header, search, glossary, tabs and the page of the current route |
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
@@ -413,7 +422,11 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/admission-context.spec.ts`, `tests/feishu-image.spec.ts` | The Thread window of assessments, and Feishu image reads |
 | `tests/assessment.spec.ts` | What the MasterAssessor keeps per Eval, and when it lets go |
 | `tests/background.spec.ts` | Waiting for a worker's shell jobs and subagents: an end that woke it, and a host that stops |
-| `tests/bundle-patch.spec.ts` | The bundle's patch, read as DeepSeek Harness reads it, and the agent preset of Executor Sessions it defines |
+| `tests/bundle-patch.spec.ts` | The bundle's patch, read as DeepSeek Harness reads it, the public control and internal router/worker presets, and the packaged bilingual metadata and icon exports |
+| `tests/repository-input.spec.ts` | Repository names and branch URLs, complete slash-containing refs, encoding, round trips and rejection before any work |
+| `tests/github-branch.spec.ts` | Explicit branch access verification, default-branch compatibility, selected-ref repository reads and the worker base-branch environment |
+| `tests/on-demand.spec.ts` | Cold-idle Host and eager-preset registration, explicit and concurrent start/stop, cancellation and recoverable failures, separate repository state, permission-preserving tools and the shared same-origin control API |
+| `tests/windows-bundle.check.mjs` | Bundle preparation in Unicode/CRLF paths, entry and metadata preflight, output/state separation, local runtime peers and inclusion of the on-demand import |
 | `tests/effects.spec.ts` | The effect queue: coalescing, limits, retries with backoff, health and shutdown |
 | `tests/passes.spec.ts` | Passes: one at a time, the ones asked for during a pass run as one after it, and the runtime health a failed pass reports |
 | `tests/outbox.spec.ts` | The Outbox on a running Runtime: messages wait while processing is paused or their Source is not installed |
@@ -436,8 +449,12 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/cards.spec.ts` | The rules the built-in text must state, file by file |
 | `tests/model-surface.spec.ts` | Everything models read: tools, prompts, skills and inputs, checked against the tool schemas, the execution environment and the glossary, within a size budget per role |
 | `tests/deployment.spec.ts`, `tests/environment.spec.ts`, `tests/index.spec.ts` | The plugin configuration and setup, the agent's process environment, the plugin entry |
+| `tests/windows-paths.spec.ts` | Native deployment/executor paths, Windows PATH/PATHEXT executable discovery, and rejection of script, relative or worker-shim paths |
+| `tests/windows-execution.spec.ts` | Native PowerShell shims and prepare commands, literal arguments, per-process environment overlays, Git credential quoting, failures and timeouts |
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the local controls, and the panel's imports, which have no cycle |
+| `tests/preset-picker.spec.tsx` | Exact internal preset filtering, delegated selection and descriptions, stale selection repair for new sessions, Slot lifecycle and third-party replacements |
+| `tests/launcher.spec.tsx` | Idle GET-only mounting, explicit start/stop, repository validation, lifecycle/error states, stale-request protection, remembered repositories, panel availability and polling cleanup |
 | `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |
 | `tests/panel-settings.spec.tsx`, `panel-prompts.spec.tsx`, `panel-deployment.spec.tsx`, `panel-panel.spec.tsx` | The settings groups, drafts and history, the prompts, the Deployment page, and the panel's search, glossary and route memory |
 | `tests/draft.spec.ts`, `tests/prompt-config.spec.ts`, `tests/markdown.spec.ts`, `tests/marks.spec.ts` | Draft states, merges and the save bar's line; the prompt configuration by section and the line diff; the Markdown subset and its links; the mark of every state the views classify |

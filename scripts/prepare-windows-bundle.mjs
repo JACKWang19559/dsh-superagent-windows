@@ -14,7 +14,8 @@ export const TESTED_PEERS = Object.freeze({
 });
 const REQUIRED = ['lib', 'prompts', 'skills', 'locale', 'LICENSE', 'README.md'];
 const OPTIONAL = ['docs', 'SETUP.md', 'README.windows.md', 'CHANGELOG.windows.md'];
-const ENTRIES = ['index.js', 'client.js', 'github-watch.js', 'feishu-watch.js'];
+const ENTRIES = ['index.js', 'client.js', 'on-demand.js', 'github-watch.js', 'feishu-watch.js'];
+const DISPLAY_PLUGINS = ['on-demand', 'github-watch', 'feishu-watch'];
 
 export function defaultStateDirectory() {
   return process.platform === 'win32'
@@ -54,11 +55,11 @@ export async function prepareWindowsBundle({ sourceDir = SOURCE_DIRECTORY, outpu
   const portableState = state.replaceAll('\\', '/');
   const configuredPatch = patch.replace(needle, needle + `      config:\n        stateDir: ${JSON.stringify(portableState)}\n`)
     .replace(/^# dsh-superagent bundle layer:[\s\S]*?(?=- insert:)/,
-      '# Generated Windows Desktop bundle; configure the GitHub Source in the management panel.\n');
+      '# Generated Windows Desktop bundle; select Superagent and explicitly start a repository. Cold starts remain idle.\n');
   const assets = join(source, 'packaging', 'windows');
   const icon = await readFile(join(assets, 'icon.svg'), 'utf8');
   const metadata = [];
-  for (const name of ['github-watch', 'feishu-watch']) {
+  for (const name of DISPLAY_PLUGINS) {
     for (const locale of ['en', 'zh']) {
       const text = await readFile(join(assets, 'locale', name, `${locale}.json`), 'utf8');
       const parsed = JSON.parse(text);
@@ -67,7 +68,7 @@ export async function prepareWindowsBundle({ sourceDir = SOURCE_DIRECTORY, outpu
     }
   }
   const manifest = { ...original,
-    description: 'Community Windows installation adaptation of the SuperAgent research prototype for DeepSeek Harness.',
+    description: 'Community Windows Superagent bundle for DeepSeek Harness: start one GitHub repository on demand with built-in Agents; stay idle until explicitly started.',
     exports: { ...original.exports, './icon': './icon.svg' },
     files: [...REQUIRED, ...OPTIONAL, 'cordis.patch.yml', 'icon.svg'],
     peerDependencies: { ...TESTED_PEERS },
@@ -76,7 +77,7 @@ export async function prepareWindowsBundle({ sourceDir = SOURCE_DIRECTORY, outpu
   // Desktop runtime; this is separate from Harness resolving shipped plugin rows.
   delete manifest.devDependencies;
   delete manifest.scripts;
-  for (const name of ['github-watch', 'feishu-watch']) {
+  for (const name of DISPLAY_PLUGINS) {
     manifest.exports[`./${name}/locale/*.json`] = `./locale/${name}/*.json`;
     manifest.exports[`./${name}/icon`] = './icon.svg';
   }
