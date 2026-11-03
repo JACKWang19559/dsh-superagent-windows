@@ -1,5 +1,5 @@
 import { execFile, spawn, type ChildProcess } from 'node:child_process'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { basename, dirname, join, resolve } from 'node:path'
 import { promisify } from 'node:util'
@@ -78,7 +78,11 @@ describe.skipIf(process.platform !== 'win32')('native Windows worker execution',
     const command = `$forwarded = @(${['-e', code, '--', ...values].map(literal).join(', ')}); gh @forwarded; [Console]::WriteLine($env:PATH)`
     const output = await runAsWorker(nativeRuntime(), powerShellCommand(command), directory, signal(), { PATH: path })
     const [line, restored] = output.trimEnd().split(/\r?\n/)
-    expect(JSON.parse(line!)).toEqual({ args: values, path: [other, process.env.PATH].join(';'), cwd: directory })
+    const forwarded = JSON.parse(line!)
+    // Windows runners may give TEMP an 8.3 alias while the native process reports its long path.
+    expect({ ...forwarded, cwd: realpathSync.native(forwarded.cwd) }).toEqual({
+      args: values, path: [other, process.env.PATH].join(';'), cwd: realpathSync.native(directory),
+    })
     expect(restored).toBe(path)
     expect(readFileSync(join(bin, 'gh.ps1'), 'utf8').charCodeAt(0)).toBe(0xfeff)
   }, 15_000)
