@@ -231,7 +231,8 @@ export function registerHttp(ctx: Context, runtime: HttpHost): () => void {
   if (ctx.webServer.host !== '127.0.0.1') throw new Error('Orchestrator management requires a loopback Web server')
   const table = routes(runtime)
   const disposers = [
-    ctx.webServer.register({ kind: 'prefix', path: '/orchestrator/api/', handler: async (req, res) => {
+    // Harness prefix routes match p and p/<path>; p must not include the trailing separator.
+    ctx.webServer.register({ kind: 'prefix', path: '/orchestrator/api', handler: async (req, res) => {
       const url = new URL(req.url ?? '/', 'http://localhost')
       if (!url.pathname.startsWith('/orchestrator/api/')) { res.writeHead(404); res.end(); return }
       if (!sameOrigin(req, ctx.webServer.port)) { json(res, 403, { error: 'Same-origin management request required' }); return }

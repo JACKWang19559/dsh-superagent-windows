@@ -1,5 +1,11 @@
 # Windows adaptation changelog
 
+## 0.1.0-windows.5 — 2026-11-03
+
+Fixes the management panel reporting “dsh-superagent is not responding” while the launcher correctly shows a running repository. The management prefix was registered with a trailing slash, but Harness matches prefix `p` against `p` and `p/<path>`. Requests such as `/orchestrator/api/state` therefore missed the route and received an empty 404. Registering `/orchestrator/api` restores the existing endpoints without changing client URLs or repository configuration.
+
+A regression test now sends real loopback HTTP requests through Harness's WebServer instead of directly invoking the handler. It covers simultaneous control/state responses, nested missing-record errors, same-origin enforcement, prefix boundaries, disposal and remounting. The test fails with 404 before the fix and passes afterwards. Client and preset code are unchanged from windows.4; no state migration is required.
+
 ## 0.1.0-windows.4 — 2026-11-03
 
 Repository input and explicit startup move into the public Superagent conversation. The sidebar replaces its idle repository form with recent run history and a **New Superagent conversation** action using Harness's public navigation API. Creating or opening a conversation does not send messages, start work, or change permissions. Current repository management and stop controls remain available.

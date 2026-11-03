@@ -1,4 +1,8 @@
 import { expect, it } from 'vitest'
+import { Context } from '@deepseek-ai/cordis'
+import { WebServer } from '@deepseek-ai/dsh-host-webserver'
+import { registerLaunchHttp } from '../src/on-demand/http.ts'
+import { testDeployment, testMachine } from './fixtures/deployment.ts'
 import { z } from 'zod'
 import { registerHttp } from '../src/app/http.ts'
 import { PromptConflict } from '../src/app/prompts.ts'
@@ -24,6 +28,55 @@ function serve(runtime: Partial<Record<keyof HttpHost, unknown>>, host = '127.0.
     return { status, body: JSON.parse(text) as Record<string, unknown> }
   }
 }
+
+it('serves control and management through the real Harness router and releases only the disposed routes', async () => {
+  const ctx = new Context()
+  try {
+    await ctx.plugin(WebServer, { host: '127.0.0.1', port: 0 }).await()
+    const running = { phase: 'running', repository: 'acme/widgets', panelAvailable: true }
+    const disposeControl = registerLaunchHttp(ctx, { status: () => running } as never)
+    const runtime = {
+      ready: Promise.resolve(), configured: () => true, deployment: testDeployment(), machine: testMachine(),
+      masterId: 'orchestrator-http-test', health: {}, executor: { activeCount: () => 0 },
+      store: { settings: () => SettingsSchema.parse({}), tickets: { open: () => [], get: () => undefined } },
+      links: () => () => ({ url: '', label: { zh: '', en: '' } }),
+    } as unknown as HttpHost
+    const disposeManagement = registerHttp(ctx, runtime)
+    const origin = `http://${ctx.webServer.host}:${ctx.webServer.port}`
+    const request = (path: string, panelHeader = true) => fetch(`${origin}${path}`, {
+      headers: panelHeader ? { 'x-orchestrator-request': '1' } : {}, signal: AbortSignal.timeout(5000),
+    })
+    const control = await request('/orchestrator/control')
+    expect(control.status).toBe(200)
+    expect(await control.json()).toMatchObject(running)
+    // Directly invoking the registered handler would miss an incorrect prefix registration.
+    const state = await request('/orchestrator/api/state')
+    expect(state.status).toBe(200)
+    expect(await state.json()).toMatchObject({
+      masterId: 'orchestrator-http-test', load: { running: 0, queued: 0 },
+      setup: { accounts: { repository: 'acme/widgets' } },
+    })
+    const missing = await request('/orchestrator/api/tickets/missing')
+    expect(missing.status).toBe(404)
+    expect(await missing.json()).toEqual({ error: 'Ticket not found' })
+    const rejected = await request('/orchestrator/api/state', false)
+    expect(rejected.status).toBe(403)
+    expect(await rejected.json()).toEqual({ error: 'Same-origin management request required' })
+    const outside = await request('/orchestrator/apix/state')
+    expect(outside.status).toBe(404)
+    expect(await outside.text()).toBe('')
+    disposeManagement()
+    const unmounted = await request('/orchestrator/api/state')
+    expect(unmounted.status).toBe(404)
+    expect(await unmounted.text()).toBe('')
+    expect(await (await request('/orchestrator/control')).json()).toMatchObject(running)
+    // A later activation must be able to register and serve the same management prefix again.
+    const disposeRemounted = registerHttp(ctx, runtime)
+    expect((await request('/orchestrator/api/state')).status).toBe(200)
+    disposeRemounted()
+    disposeControl()
+  } finally { await ctx.fiber.dispose() }
+})
 
 it('answers each kind of failure with its own status', async () => {
   const saves: unknown[] = []

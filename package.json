@@ -2,7 +2,7 @@
   "name": "dsh-superagent",
   "author": "DeepSeek Harness Team <team@dsh.dev>",
   "license": "MIT",
-  "version": "0.1.0-windows.4",
+  "version": "0.1.0-windows.5",
   "private": true,
   "repository": {
     "type": "git",

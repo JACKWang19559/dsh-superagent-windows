@@ -2,7 +2,7 @@
 
 这是 [DeepSeek Harness SuperAgent 研究原型](https://github.com/deepseek-ai/dsh-superagent-prototype)的社区 fork，发布在 [JACKWang19559/dsh-superagent-windows](https://github.com/JACKWang19559/dsh-superagent-windows)。保留上游源码、提交历史、版权与 [MIT 许可证](LICENSE)，不是 DeepSeek 官方 Windows 产品。
 
-**`0.1.0-windows.4` 默认待机。** 在新建会话时选择 **Superagent · 按需启动**，填写 GitHub 仓库名或分支链接并明确启动后，才检查账号、连接 GitHub 和运行仓库编排。执行器使用 Harness 内置 Agent。主 Session 和执行器预设仅供内部创建，从新建会话的模式菜单隐藏。
+**`0.1.0-windows.5` 默认待机。** 在新建会话时选择 **Superagent · 按需启动**，填写 GitHub 仓库名或分支链接并明确启动后，才检查账号、连接 GitHub 和运行仓库编排。执行器使用 Harness 内置 Agent。主 Session 和执行器预设仅供内部创建，从新建会话的模式菜单隐藏。
 
 ## 使用方式
 
@@ -31,7 +31,7 @@
 git clone https://github.com/JACKWang19559/dsh-superagent-windows.git
 Set-Location dsh-superagent-windows
 powershell -NoProfile -File scripts/build-windows.ps1 `
-  -OutputDirectory '.artifacts/windows-bundle-v4'
+  -OutputDirectory '.artifacts/windows-bundle-v5'
 ```
 
 脚本依次安装锁定的源码依赖（禁用安装脚本），运行类型检查和选定的 Windows 回归，构建并验证打包器，再生成本地安装目录、安装生产依赖，最后实际导入 Host、按需控制台、GitHub、飞书 ESM 入口并检查状态目录配置。它输出交给 Harness `plugin_manager` 的安装参数，不修改 Profile。
@@ -42,7 +42,7 @@ powershell -NoProfile -File scripts/build-windows.ps1 `
 powershell -NoProfile -File scripts/build-windows.ps1 `
   -NodePath 'C:\path\to\node.exe' `
   -PnpmScript 'C:\path\to\pnpm.mjs' `
-  -OutputDirectory 'C:\Tools\Superagent\bundle-v4' `
+  -OutputDirectory 'C:\Tools\Superagent\bundle-v5' `
   -StateDirectory 'C:\Tools\Superagent\state'
 ```
 
@@ -51,9 +51,9 @@ powershell -NoProfile -File scripts/build-windows.ps1 `
 已有新版构建产物时，只生成安装包：
 
 ```powershell
-pnpm bundle:windows --output .artifacts/windows-bundle-v4 --state-dir 'C:\Tools\Superagent\state'
-pnpm --dir .artifacts/windows-bundle-v4 install --prod --ignore-scripts
-node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v4
+pnpm bundle:windows --output .artifacts/windows-bundle-v5 --state-dir 'C:\Tools\Superagent\state'
+pnpm --dir .artifacts/windows-bundle-v5 install --prod --ignore-scripts
+node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v5
 ```
 
 **生成目录必须安装自己的生产依赖。** Harness 本地目录安装使用链接；代码的 bare ESM imports 需要该目录里的依赖，不能借用源码祖先目录的开发版本。生成包只保留运行依赖和兼容目标所需的四个 peers，导入检查会拒绝缺少本地依赖的包。打包器也会在创建输出前拒绝缺少 `on-demand.js` 或按需插件中英文本地化资源的产物。
@@ -65,17 +65,19 @@ node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v4
 ```json
 {
   "action": "install_bundle",
-  "target": "C:\\Tools\\Superagent\\bundle-v4"
+  "target": "C:\\Tools\\Superagent\\bundle-v5"
 }
 ```
 
 不要手动编辑 Profile 的包清单或 Cordis patch，也不要在 Profile 目录运行 pnpm。以安装器的 `application`、`warnings` 和 `nextStep` 为准；`applied` 表示 Host 安装已应用，仍应验证页面实际加载的客户端。首次安装后刷新当前 Harness 窗口，在新会话中选择新增预设；已有会话保留其原预设版本。
 
-**Windows Desktop 将同名插件升级到另一个本地目录后，需要完整退出 Harness 再重新打开。** Desktop `0.2.1-rc.5` 的 Host 会缓存客户端文件路径及内容，桌面进程还保留启动资源清单；单纯刷新页面不能清除这些缓存。使用应用菜单或托盘里的“退出”，不要只关闭窗口（可能只是隐藏到托盘）。重开后，待机页面应显示启动历史和“新建 Superagent 会话”按钮，仓库与分支在会话里提供。
+**Windows Desktop 升级包含客户端代码变更的插件时，需要完整退出 Harness 再重新打开。** Desktop `0.2.1-rc.5` 的 Host 会缓存客户端文件路径及内容，桌面进程还保留启动资源清单；单纯刷新页面不能清除这些缓存。使用应用菜单或托盘里的“退出”，不要只关闭窗口（可能只是隐藏到托盘）。重开后，待机页面应显示启动历史和“新建 Superagent 会话”按钮，仓库与分支在会话里提供。windows.4 → windows.5 仅修复 Host 路由；客户端产物一致且安装结果为 `application: applied` 时，无需为此重启客户端。
 
 若后台 `/orchestrator/control` 返回 `idle`，页面却仍显示旧版概览标签和“dsh-superagent 没有响应”，先核对实际 `/plugins/` 客户端文件是否含有 `/orchestrator/control`。待机时旧 `/orchestrator/api/state` 返回 404 属于正常行为；不要为了消除旧页面的报错而启动仓库。
 
-本地安装通过链接引用生成目录，**保留该目录及其依赖，不要在已链接目录中重新 build 或覆盖文件**。升级前停止当前仓库并备份状态目录，在新的 `bundle-v4`（以后使用新的版本号）目录生成包，再通过插件管理器安装。停用、卸载和升级都使用插件管理器。安装包、依赖和状态数据均不提交到 Git。
+若 `/orchestrator/control` 为 `running`，管理页却提示“没有响应”，且 `/orchestrator/api/state` 返回空的 404，请升级至 windows.5 或之后的版本。旧版管理接口注册路径末尾多了 `/`，不符合 Harness 的前缀匹配规则；这不表示仓库或分支设置错误。
+
+本地安装通过链接引用生成目录，**保留该目录及其依赖，不要在已链接目录中重新 build 或覆盖文件**。升级前停止当前仓库并备份状态目录，在新的 `bundle-v5`（以后使用新的版本号）目录生成包，再通过插件管理器安装。停用、卸载和升级都使用插件管理器。安装包、依赖和状态数据均不提交到 Git。
 
 ## 仓库状态与旧版数据
 
@@ -92,7 +94,7 @@ Windows 默认根状态目录为 `%LOCALAPPDATA%\dsh-superagent`，位于安装�
       ...
 ```
 
-`history.json` 从本版起记录最近 30 次真实启动，不回填早期版本的运行。它与各仓库的工单数据库独立，读取历史不会打开这些数据库或连接 GitHub。重启后未结束的记录标为“已中断”，未知结束时间留空。若文件损坏或无法保存，页面会提示问题；现有损坏文件保留，仍可停止工作。
+`history.json` 从 windows.4 起记录最近 30 次真实启动，不回填早期版本的运行。它与各仓库的工单数据库独立，读取历史不会打开这些数据库或连接 GitHub。重启后未结束的记录标为“已中断”，未知结束时间留空。若文件损坏或无法保存，页面会提示问题；现有损坏文件保留，仍可停止工作。
 
 `launcher.json` 只记住仓库名和可选分支，不保存凭据，也不表示自动启动。仓库名比较时忽略大小写，分支名区分大小写。未指定分支时仍使用旧版仓库 hash；显式分支使用“仓库小写名 + NUL + 完整分支名”的独立 hash，包括显式填写默认分支名的情况。各目标的工单、策略、模型设置、检查点和工作目录独立保存，不会自动复制另一分支的设置或恢复其任务。停止后数据保留，旧版仅含仓库名的记忆文件仍可读取。
 
