@@ -1,5 +1,13 @@
 # Windows adaptation changelog
 
+## 0.1.0-windows.4 — 2026-11-03
+
+Repository input and explicit startup move into the public Superagent conversation. The sidebar replaces its idle repository form with recent run history and a **New Superagent conversation** action using Harness's public navigation API. Creating or opening a conversation does not send messages, start work, or change permissions. Current repository management and stop controls remain available.
+
+A bounded local journal retains the latest 30 starts with repository, exact branch, timestamps, lifecycle state, and known console/orchestrator session ids. The caller's console id comes from tool execution context. The history view and the tool's new `history` action share the Host service; reads never scan ticket databases, probe GitHub, or start a Runtime. Cold startup marks unfinished records interrupted and remains idle. History storage errors are reported without blocking worker shutdown or silently replacing corrupt data. Earlier versions' launches are not reconstructed.
+
+Upgrade into a fresh bundle directory and fully quit/reopen Desktop `0.2.1-rc.5` to load the new client and preset revision. Existing conversation revisions remain unchanged; use a new Superagent conversation for the updated guidance and history tool action.
+
 ## 0.1.0-windows.3 — 2026-11-03
 
 The new-session mode picker hides the internal router and worker presets while keeping them registered for Harness's own session creation. The public **Superagent · 按需启动** entry and other modes remain available. The UI delegates to the shipped picker through its public Slot, retaining descriptions, keyboard handling and selection behavior.

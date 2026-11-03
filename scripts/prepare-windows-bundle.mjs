@@ -68,7 +68,7 @@ export async function prepareWindowsBundle({ sourceDir = SOURCE_DIRECTORY, outpu
     }
   }
   const manifest = { ...original,
-    description: 'Community Windows Superagent bundle for DeepSeek Harness: start one GitHub repository on demand with built-in Agents; stay idle until explicitly started.',
+    description: 'Community Windows Superagent for DeepSeek Harness: start a GitHub repository in conversation with built-in Agents; review local run history and status in the sidebar.',
     exports: { ...original.exports, './icon': './icon.svg' },
     files: [...REQUIRED, ...OPTIONAL, 'cordis.patch.yml', 'icon.svg'],
     peerDependencies: { ...TESTED_PEERS },

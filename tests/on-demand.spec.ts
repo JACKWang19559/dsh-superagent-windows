@@ -143,7 +143,7 @@ it('loading the Host and eager preset with valid saved configuration makes no pr
   initializeRepository(repositoryDirectory(root, 'acme/widgets'), 'acme/widgets')
   const ctx = new Context(); contexts.push(ctx)
   ctx.reflect.provide('webServer', { host: '127.0.0.1', port: 3082, register: vi.fn(() => () => {}) })
-  const probe = vi.spyOn(Setup.prototype, 'run')
+  const probe = vi.spyOn(Setup.prototype, 'run'), readSettings = vi.spyOn(Store.prototype, 'settings')
   await applyHost(ctx, testMachine({ stateDir: root }) as never)
   const start = vi.spyOn(ctx.superagentControl, 'start')
   const sourcePlugins = [ctx.plugin(githubPlugin), ctx.plugin(feishuPlugin)]
@@ -159,7 +159,9 @@ it('loading the Host and eager preset with valid saved configuration makes no pr
   await agentEvents(ctx, { ctx, id: 'fork', session: { header: { isSeeded: true } } } as never).serial('agent/created', { source: 'startup' })
   expect(ctx.superagentControl.status().phase).toBe('idle')
   expect(ctx.get('orchestrator')).toBeUndefined()
-  expect(probe).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled()
+  expect(ctx.superagentControl.history()).toEqual({ entries: [], limit: 30, error: null })
+  expect(ctx.superagentControl.history()).toEqual({ entries: [], limit: 30, error: null })
+  expect(probe).not.toHaveBeenCalled(); expect(start).not.toHaveBeenCalled(); expect(readSettings).not.toHaveBeenCalled()
 })
 
 it('scopes one bounded control tool, validates arguments, preserves permissions, and does not auto-start', async () => {
@@ -174,33 +176,49 @@ it('scopes one bounded control tool, validates arguments, preserves permissions,
   applyPreset(ctx)
   expect(factory).not.toHaveBeenCalled()
   expect(LAUNCH_GUIDANCE.length).toBeLessThan(1000)
-  expect(ControlArguments.shape.action.options).toEqual(['status', 'start', 'stop'])
+  expect(ControlArguments.shape.action.options).toEqual(['status', 'history', 'start', 'stop'])
   expect(await definition!.execute({ action: 'status' }, {})).toMatchObject({ phase: 'idle' })
-  const execution = { agent: { session: { header: {} } } }
+  expect(await definition!.execute({ action: 'history' }, {})).toEqual({ entries: [], limit: 30, error: null })
+  expect(permission).not.toHaveBeenCalled(); expect(factory).not.toHaveBeenCalled()
+  await expect(definition!.execute({ action: 'history', repository: 'acme/widgets' }, {})).rejects.toThrow()
+  const execution = { agent: { session: { id: 'console-1', header: {} } } }
   await expect(definition!.execute({ action: 'start', repository: 'acme/widgets' }, execution)).rejects.toThrow('Full access')
   expect(factory).not.toHaveBeenCalled()
   permission.mockReturnValue('danger-full-access')
-  expect(await definition!.execute({ action: 'start', repository: 'acme/widgets' }, execution)).toMatchObject({ phase: 'running' })
+  expect(await definition!.execute({ action: 'start', repository: 'acme/widgets' }, execution)).toMatchObject({ phase: 'running', consoleId: 'console-1' })
+  expect(control.history().entries[0]).toMatchObject({ consoleId: 'console-1', masterId: 'master', phase: 'running' })
   await expect(definition!.execute({ action: 'stop' }, { agent: { session: { header: { parentSession: 'worker' } } } })).rejects.toThrow('user Superagent')
   expect((await definition!.execute({ action: 'stop' }, execution) as { phase: string }).phase).toBe('idle')
 })
 
 it('keeps GET status immediate, rejects malformed and cross-origin operations, and shares start/stop with the tool', async () => {
-  const control = new Launcher(vi.fn(async () => running()))
-  let handler!: (req: unknown, res: unknown) => Promise<void>
-  registerLaunchHttp({ webServer: { host: '127.0.0.1', port: 3082, register: (route: { handler: typeof handler }) => { handler = route.handler; return () => {} } } } as never, control)
-  const call = async (method: string, body = '', headers: Record<string, string> = {}) => {
+  const factory = vi.fn(async () => running()), control = new Launcher(factory)
+  type Handler = (req: unknown, res: unknown) => Promise<void>
+  const handlers = new Map<string, Handler>(), removed: string[] = []
+  const dispose = registerLaunchHttp({ webServer: { host: '127.0.0.1', port: 3082, register: (route: { path: string; handler: Handler }) => {
+    handlers.set(route.path, route.handler); return () => { removed.push(route.path) }
+  } } } as never, control)
+  const call = async (method: string, body = '', headers: Record<string, string> = {}, path = '/orchestrator/control') => {
     let code = 0, value: unknown
-    await handler({ method, headers: { host: '127.0.0.1:3082', 'x-orchestrator-request': '1', ...headers },
+    await handlers.get(path)!({ method, headers: { host: '127.0.0.1:3082', 'x-orchestrator-request': '1', ...headers },
       async *[Symbol.asyncIterator]() { yield Buffer.from(body) } },
     { writeHead: (status: number) => { code = status }, end: (text: string) => { value = JSON.parse(text) } })
     return { code, value }
   }
   expect(await call('GET')).toMatchObject({ code: 200, value: { phase: 'idle' } })
+  expect(await call('GET', '', {}, '/orchestrator/history')).toEqual({ code: 200, value: { entries: [], limit: 30, error: null } })
+  expect((await call('GET', '', { origin: 'https://evil.example' }, '/orchestrator/history')).code).toBe(403)
+  expect((await call('POST', '{}', {}, '/orchestrator/history')).code).toBe(405)
+  expect((await call('DELETE')).code).toBe(405)
+  expect((await call('POST', JSON.stringify({ action: 'history' }))).value).toEqual(control.history())
+  expect((await call('POST', JSON.stringify({ action: 'history', repository: 'acme/widgets' }))).code).toBe(400)
+  expect(factory).not.toHaveBeenCalled()
   expect((await call('POST', '{')).code).toBe(400)
   expect((await call('POST', JSON.stringify({ action: 'start', repository: 'acme/widgets' }), { origin: 'https://evil.example' })).code).toBe(403)
   expect((await call('POST', ' '.repeat(8193))).code).toBe(400)
   expect((await call('POST', JSON.stringify({ action: 'start', repository: 'acme/widgets' }))).value).toMatchObject({ phase: 'running' })
   expect((await call('POST', JSON.stringify({ action: 'start', repository: 'other/repo' }))).code).toBe(409)
   expect((await call('POST', JSON.stringify({ action: 'stop' }))).value).toMatchObject({ phase: 'idle' })
+  expect((await call('GET', '', {}, '/orchestrator/history')).value).toMatchObject({ entries: [{ phase: 'stopped', masterId: 'master' }] })
+  dispose(); expect(removed.sort()).toEqual(['/orchestrator/control', '/orchestrator/history'])
 })

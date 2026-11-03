@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Superagent on-demand console",
-    "description": "Explicitly start GitHub synchronization for one repository with Harness built-in Agents, read its status, or stop its polling and workers. Selecting the preset stays idle."
+    "description": "Provide a GitHub repository or branch in conversation and explicitly start Harness built-in Agents; read status and recent run history or stop current work. Selecting the preset stays idle."
   }
 }

@@ -1858,10 +1858,13 @@ it.each([null, 'codex/video-editing'])('Windows on-demand launcher binds reposit
   expect(ctx.get('orchestrator')).toBeUndefined()
   expect(subprocess.spawn).not.toHaveBeenCalled(); expect(controller.create).not.toHaveBeenCalled(); expect(mounted).toBe(0)
   try {
-    const [first, second] = await Promise.all([control.start(input), control.start(input.replace('acme/widgets', 'ACME/widgets'))])
+    const [first, second] = await Promise.all([control.start(input, 'user-console'), control.start(input.replace('acme/widgets', 'ACME/widgets'), 'other-console')])
     await bridge.await()
     expect(first).toMatchObject({ phase: 'running', repository: 'acme/widgets', branch })
     expect(second.masterId).toBe(first.masterId); expect(mounted).toBe(1)
+    expect(first.consoleId).toBe('user-console')
+    expect(control.history()).toMatchObject({ error: null, entries: [{ repository: 'acme/widgets', branch,
+      consoleId: 'user-console', masterId: first.masterId, phase: 'running', startedAt: expect.any(String), endedAt: null }] })
     expect(replaySources).toEqual([1]); expect(githubAtReplay).toEqual([true])
     runtime = ctx.orchestrator as Runtime
     const account = runtime.store.settings().sources.github!
@@ -1880,6 +1883,8 @@ it.each([null, 'codex/video-editing'])('Windows on-demand launcher binds reposit
     expect(process.env).toEqual(before)
     const status = await control.stop(); await bridge.await()
     expect(status.phase).toBe('idle'); expect(ctx.get('orchestrator')).toBeUndefined(); expect(unmounted).toBe(1)
+    expect(control.history().entries).toEqual([expect.objectContaining({ consoleId: 'user-console', masterId: first.masterId,
+      phase: 'stopped', endedAt: expect.any(String) })])
     expect(agents.get(sessionId)!.cancel).toHaveBeenCalled()
     expect(process.env).toEqual(before)
     expect((await control.start(input)).phase).toBe('running')

@@ -42,8 +42,12 @@ function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
       throw error
     }
   }, [ctx, t])
+  const startSession = useCallback(() => {
+    pending.current?.abort()
+    ctx.uiWorkspace.startSession(undefined, { agentPreset: 'superagent' })
+  }, [ctx])
   const form = usePageForm(ctx.get('configForms')?.get<Record<string, unknown>>(ENTRY))
-  return <Launcher t={t} openSession={openSession} deploymentForm={form} />
+  return <Launcher t={t} openSession={openSession} startSession={startSession} deploymentForm={form} />
 }
 
 export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace']

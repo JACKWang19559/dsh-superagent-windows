@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Superagent",
-    "description": "监听单个 GitHub 仓库，把获授权的请求转为 Ticket，并在各自的 DSH 会话中执行。"
+    "description": "在 Superagent 会话中明确启动 GitHub 仓库，由 Harness Agent 执行获授权的工单；侧栏查看启动历史、运行状态和设置。"
   }
 }

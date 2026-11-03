@@ -1,6 +1,6 @@
 # SuperAgent for Windows — on-demand Harness Agents
 
-Community fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype), preserving the upstream source history and MIT license. **`0.1.0-windows.3` stays idle until explicitly started.** Select **Superagent · 按需启动** in Harness, enter a GitHub repository or branch URL, and start it when needed. Orchestrator and worker sessions use Harness built-in Agents.
+Community fork of [deepseek-ai/dsh-superagent-prototype](https://github.com/deepseek-ai/dsh-superagent-prototype), preserving the upstream source history and MIT license. **`0.1.0-windows.4` stays idle until explicitly started.** Open a **Superagent · 按需启动** conversation, provide a GitHub repository or branch URL in chat, and explicitly request startup. The sidebar shows recent run history and current management controls, with a button to open a Superagent conversation. Orchestrator and worker sessions use Harness built-in Agents.
 
 The launcher accepts `owner/repo`, `/owner/repo`, repository URLs and branch URLs such as `https://github.com/owner/repo/tree/codex/video-editing`. Explicit branches are checked on startup and used for repository reads and new ticket workspaces. The internal router and worker modes are hidden from the new-session picker. Stop the current target before switching repositories or branches.
 
@@ -13,7 +13,7 @@ Native Windows account discovery, PowerShell worker shims and Git preparation ar
 With Node.js 24, pnpm 11.7.0 and Windows PowerShell 5.1 (or PowerShell 7) available, run from this checkout:
 
 ```powershell
-powershell -NoProfile -File scripts/build-windows.ps1 -OutputDirectory '.artifacts/windows-bundle-v3'
+powershell -NoProfile -File scripts/build-windows.ps1 -OutputDirectory '.artifacts/windows-bundle-v4'
 ```
 
 This builds, tests and prepares a new installation directory with its runtime dependencies. It prints the `plugin_manager` arguments for installation inside Harness; it does not edit a Harness profile. Keep the generated directory local and use a fresh directory for each upgrade. If you use Harness's bundled Node/pnpm, see the explicit executable parameters in the Windows guide.

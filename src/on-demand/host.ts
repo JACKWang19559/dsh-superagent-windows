@@ -7,9 +7,10 @@ import { lockSync } from 'proper-lockfile'
 import type { Machine } from '../deployment.ts'
 import { Runtime } from '../app/runtime.ts'
 import { Store } from '../app/store.ts'
-import { Launcher, RepositorySchema, type ActiveRun } from './controller.ts'
+import { Launcher, LaunchFailure, RepositorySchema, type ActiveRun } from './controller.ts'
+import { LaunchHistoryStore } from './history.ts'
 import { isValidBranch, parseRepositoryInput, repositoryInput, type RepositoryTarget } from './repository.ts'
-import type { LaunchControl, LaunchStatus } from './types.ts'
+import type { LaunchControl, LaunchHistory, LaunchStatus } from './types.ts'
 
 /** Default-branch repositories keep their old directory; explicit branches have separate, case-sensitive state. */
 export const repositoryDirectory = (stateDir: string, repository: string, branch: string | null = null): string =>
@@ -61,11 +62,13 @@ export class SuperagentControl extends Service implements LaunchControl {
   private readonly launcher: Launcher
   constructor(ctx: Context, private readonly machine: Machine) {
     super(ctx, 'superagentControl')
-    this.launcher = new Launcher((target, signal) => this.activate(ctx, target, signal), rememberedRepository(machine.stateDir))
+    this.launcher = new Launcher((target, signal) => this.activate(ctx, target, signal), rememberedRepository(machine.stateDir),
+      new LaunchHistoryStore(join(machine.stateDir, 'history.json')))
     ctx.effect(() => () => this.launcher.dispose())
   }
   status(): LaunchStatus { return this.launcher.status() }
-  start(repository: string): Promise<LaunchStatus> { return this.launcher.start(repository) }
+  history(): LaunchHistory { return this.launcher.history() }
+  start(repository: string, consoleId?: string): Promise<LaunchStatus> { return this.launcher.start(repository, consoleId) }
   stop(): Promise<LaunchStatus> { return this.launcher.stop() }
   private async activate(ctx: Context, { repository, branch }: RepositoryTarget, signal: AbortSignal): Promise<ActiveRun> {
     signal.throwIfAborted()
@@ -113,6 +116,10 @@ export class SuperagentControl extends Service implements LaunchControl {
       return { stop, view: () => ({ phase: restartError ? 'error' : !ready ? 'starting' : runtime!.configured() ? 'running' : 'needs-setup',
         masterId: ready && runtime!.configured() ? runtime!.masterId : null, panelAvailable: ready && !restartError && !stopped,
         error: restartError ?? runtime!.setupProblem?.detail ?? null }) }
-    } catch (error) { await stop(); throw error }
+    } catch (error) {
+      const masterId = ready && runtime?.configured() ? runtime.masterId : null
+      try { await stop() } catch (cleanupError) { throw new LaunchFailure(cleanupError, masterId, true) }
+      throw new LaunchFailure(error, masterId)
+    }
   }
 }

@@ -292,10 +292,11 @@ Some generic modules still refer directly to GitHub or Feishu:
 | --- | --- |
 | `src/index.ts` | The main plugin entry: reads the machine settings and registers the idle Host supervisor and local launch endpoint; only an explicit start creates a repository Runtime |
 | `src/on-demand/repository.ts` | Shared owner/repo and GitHub branch-link parsing, Git ref validation, canonical inputs and case-sensitive branch identity; no network calls |
-| `src/on-demand/types.ts` | The shared `LaunchStatus`, `LaunchRequest` and `LaunchControl` contracts for the Host, control tool and client |
-| `src/on-demand/controller.ts` | `Launcher`: validates repository and action inputs, serializes start and stop, handles cancellation and failures, and exposes idle status without starting work |
+| `src/on-demand/types.ts` | Shared launch status, history, request and control contracts for the Host, console tool and client |
+| `src/on-demand/history.ts` | Bounded local startup journal, atomic persistence, schema validation, interrupted-run recovery and explicit storage errors |
+| `src/on-demand/controller.ts` | `Launcher`: validates inputs, serializes start/stop, handles cancellation/failure and records startup history with live status overlays; reads never start work |
 | `src/on-demand/host.ts` | `SuperagentControl`: creates one Runtime in its repository's hashed state directory, seeds new settings and the clone/branch prepare command, remembers the last repository without auto-resuming, and disposes the Runtime on stop |
-| `src/on-demand/http.ts` | The always-available `/orchestrator/control` status and action endpoint, same-origin and argument checks, and the dispatch shared with the control tool |
+| `src/on-demand/http.ts` | Always-available `/orchestrator/control` and `/orchestrator/history`, same-origin and argument checks, and dispatch shared with the console tool |
 | `src/on-demand/preset.ts` | The `./on-demand` preset plugin: registers startup guidance and the scoped `superagent_control` tool, requires the control session already to have Full access for start, and does not activate a repository on selection |
 | `src/deployment.ts` | The plugin `Config` and `Machine`; `resolveDeployment` and `resolveFeishuBot` read the repository and the accounts from the Source settings, each CLI run as Executor shells run it; `SETUP_FIELDS` lists the Source fields setup reads. The code names no person, account or organization |
 | `src/setup.ts` | Setup problems: `SetupError`, with a code, the place that fixes it and the English text the log, the main Session and the panel share |
@@ -383,7 +384,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
 | `src/client/launch-control.ts` | `useLaunchControl`: validates launch responses, polls local status, submits explicit actions, ignores stale requests, reconciles failures and cleans up polling on unmount |
 | `src/client/preset-picker.tsx` | Delegates the public new-session Slot to the shipped picker while filtering the two internal Superagent presets; preserves the Host registry and restores the original on unload |
-| `src/client/launcher.tsx` | The on-demand panel entry: repository input, start/stop controls, lifecycle and permission copy, the link to the separate main Session, and the existing panel while its Runtime is available |
+| `src/client/launcher.tsx` | Conversation creation and navigation, recent history while idle, current status/stop controls, and the existing panel while its Runtime is available; no repository form or UI start request |
+| `src/client/history.tsx` | Independent local history fetch/poll/refresh, bounded record validation, localized run timestamps/states, session links and empty/error states |
 | `src/client/app.tsx` | The panel: header, search, glossary, tabs and the page of the current route |
 | `src/client/provider.tsx` | What every page reads from its host: copy, calls, navigation, notices, the state poll, and `restart`, which reads the state quickly while dsh-superagent restarts |
 | `src/client/api.ts` | Calls and polls of the management API, typed by `src/app/api.ts`, and the Decision filters of the Eval status |
@@ -454,7 +456,9 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/service-script.spec.ts` | `scripts/dsh-superagent` against fake `ps`, `tmux` and `dsh` |
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the local controls, and the panel's imports, which have no cycle |
 | `tests/preset-picker.spec.tsx` | Exact internal preset filtering, delegated selection and descriptions, stale selection repair for new sessions, Slot lifecycle and third-party replacements |
-| `tests/launcher.spec.tsx` | Idle GET-only mounting, explicit start/stop, repository validation, lifecycle/error states, stale-request protection, remembered repositories, panel availability and polling cleanup |
+| `tests/launcher.spec.tsx` | Idle GET-only mounting and conversation creation, no form/start POST, current management/stop and console links, lifecycle errors and polling cleanup |
+| `tests/history-panel.spec.tsx` | History empty/loading/error states, record validation, session navigation, independent refresh/polling and unmount cleanup |
+| `tests/history.spec.ts` | Durable bounded startup history, concurrency and cancellation, timestamps/session ids, cold interruption, schema validation and corrupt/unwritable storage |
 | `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |
 | `tests/panel-settings.spec.tsx`, `panel-prompts.spec.tsx`, `panel-deployment.spec.tsx`, `panel-panel.spec.tsx` | The settings groups, drafts and history, the prompts, the Deployment page, and the panel's search, glossary and route memory |
 | `tests/draft.spec.ts`, `tests/prompt-config.spec.ts`, `tests/markdown.spec.ts`, `tests/marks.spec.ts` | Draft states, merges and the save bar's line; the prompt configuration by section and the line diff; the Markdown subset and its links; the mark of every state the views classify |

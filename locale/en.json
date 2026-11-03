@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Superagent",
-    "description": "Watch one GitHub repository, turn authorized requests into Tickets, and execute each in its own DSH Session."
+    "description": "Explicitly start a GitHub repository in a Superagent conversation with Harness Agents; review run history, status, settings and authorized Tickets in the sidebar."
   }
 }

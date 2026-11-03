@@ -20,7 +20,7 @@ function fixture(listed: string[]) {
     locale: { register: (ns: string, value: unknown) => { dictionaries[ns] = value; return () => {} }, bind: () => t },
     effect: (effect: () => unknown) => { effect() },
     sessions: { list: { getSnapshot: () => ({ phase: 'ready', byId: Object.fromEntries(listed.map(id => [id, {}])) }) }, refresh: vi.fn(async () => {}) },
-    uiWorkspace: { openSession: vi.fn() },
+    uiWorkspace: { openSession: vi.fn(), startSession: vi.fn() },
     // Omit config form service so Deployment renders read-only.
     get: () => undefined,
   }
@@ -40,9 +40,11 @@ const openMaster = async (container: HTMLElement) => {
   await act(async () => { button.click() })
   for (let i = 0; i < 5; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
 }
-const serve = () => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+const serve = (phase: 'idle' | 'running' = 'running') => vi.stubGlobal('fetch', vi.fn(async (url: string) => {
   const path = new URL(url, 'http://127.0.0.1').pathname.replace('/orchestrator/api/', '')
-  if (path === '/orchestrator/control') return Response.json({ phase: 'running', executor: 'harness', repository: 'acme/widgets', lastRepository: 'acme/widgets', masterId: 'master', panelAvailable: true, error: null })
+  if (path === '/orchestrator/history') return Response.json({ entries: [], limit: 30, error: null })
+  if (path === '/orchestrator/control') return Response.json({ phase, executor: 'harness', repository: phase === 'idle' ? null : 'acme/widgets',
+    lastRepository: 'acme/widgets', masterId: phase === 'idle' ? null : 'master', panelAvailable: phase === 'running', error: null })
   if (path === 'overview') return Response.json({ problems: [], person: [], executor: { running: 0, queued: 0, maxWorkers: 3, idle: 0 }, flow: { triggers: 0, filtered: 0, judged: 0, accepted: 0, evaluating: 0 }, policyVersion: 'v' })
   if (path === 'state') return Response.json({ masterId: 'master', settings: SettingsSchema.parse({}), revisions: { policy: 0, eval: 0, executor: 0 }, sources: [], policy_version: 'v', health: {}, outgoing: [], load: { running: 0, queued: 0 },
     setup: { machine: { stateDir: '/srv/state', worktreeRoot: '/srv/state/worktrees', blockedCommands: [], promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000 }, problem: null, feishuProblem: null, accounts: null } })
@@ -58,6 +60,19 @@ it('registers a localized main panel, sidebar entry and Plugin Manager row page,
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })
   expect(nav.options.label?.()).toBe('Superagent')
+})
+
+it('opens a new Superagent session with no draft override, message, repository start or permission change', async () => {
+  serve('idle')
+  const { ctx, main } = fixture([])
+  const view = await render(main, { t })
+  const button = [...view.container.querySelectorAll('button')].find(item => item.textContent === zh['launcher.newSession'])!
+  await act(async () => { button.click() })
+  expect(ctx.uiWorkspace.startSession).toHaveBeenCalledExactlyOnceWith(undefined, { agentPreset: 'superagent' })
+  expect(ctx.uiWorkspace.openSession).not.toHaveBeenCalled()
+  expect(vi.mocked(fetch).mock.calls.every(([, init]) => init?.method === 'GET' && init.body === undefined)).toBe(true)
+  expect(view.container.querySelector('input')).toBeNull()
+  view.dispose()
 })
 
 it('opens a listed Session through the workspace from the main panel', async () => {

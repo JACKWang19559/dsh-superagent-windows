@@ -16,7 +16,7 @@
       config:
         id: superagent
         name: Superagent · 按需启动
-        description: 主动启动 GitHub 仓库编排，使用 Harness 内置 Agent；选择预设后先待机，启动时才检查账号与同步。
+        description: 在会话中填写 GitHub 仓库或分支链接并明确启动，使用 Harness 内置 Agent 执行；侧栏查看历史与运行状态。
         order: 10
         plugins:
           - id: persona

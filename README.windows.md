@@ -2,15 +2,16 @@
 
 这是 [DeepSeek Harness SuperAgent 研究原型](https://github.com/deepseek-ai/dsh-superagent-prototype)的社区 fork，发布在 [JACKWang19559/dsh-superagent-windows](https://github.com/JACKWang19559/dsh-superagent-windows)。保留上游源码、提交历史、版权与 [MIT 许可证](LICENSE)，不是 DeepSeek 官方 Windows 产品。
 
-**`0.1.0-windows.3` 默认待机。** 在新建会话时选择 **Superagent · 按需启动**，填写 GitHub 仓库名或分支链接并明确启动后，才检查账号、连接 GitHub 和运行仓库编排。执行器使用 Harness 内置 Agent。主 Session 和执行器预设仅供内部创建，从新建会话的模式菜单隐藏。
+**`0.1.0-windows.4` 默认待机。** 在新建会话时选择 **Superagent · 按需启动**，填写 GitHub 仓库名或分支链接并明确启动后，才检查账号、连接 GitHub 和运行仓库编排。执行器使用 Harness 内置 Agent。主 Session 和执行器预设仅供内部创建，从新建会话的模式菜单隐藏。
 
 ## 使用方式
 
 1. 在 Harness 新建会话，选择 **Superagent · 按需启动**（预设 id 为 `superagent`）。选择、重新打开会话或查看侧栏只读取本地状态，不会检查 GitHub 或启动后台工作。
 2. 填写 `owner/repo`（也接受 `/owner/repo`）、`https://github.com/owner/repo`，或 `https://github.com/owner/repo/tree/分支名`。例如 `https://github.com/5th-Axiom/VideoInWay/tree/codex/video-editing` 会选择完整分支 `codex/video-editing`；不带分支时使用仓库默认分支。请复制分支根页链接，去掉查询参数和锚点；`/tree/` 后的整个路径都作为分支，不猜测其中的目录。启动时才使用本机原生 `gh.exe` 当前登录账号检查仓库读写权限及指定分支是否存在。
-3. 在控制台明确说“启动 `owner/name` 的 Superagent”，或打开左侧 **Superagent** 管理页，填写仓库并点 **启动 Superagent**。控制台工具要求该会话已经由用户选择“完整访问权限”；它只检查权限，不会代为提升。面板启动按钮旁会说明：**执行会话使用完整文件访问权限，并使用当前 gh 登录账号。**
-4. 若显示“需要完成设置”，根据面板的具体错误处理 gh 登录、仓库访问或运行环境，再在面板重新检查。运行后，在 **设置 › 来源 › GitHub** 的 Policy 中填写“能发起工作的 GitHub 账号”，并按需要调整评估规则；允许名单不会自动替用户填写。
-5. 从已允许的账号，在该仓库的 Issue 或评论中发出符合策略的请求。面板显示触发、评估、工单和工作会话；实际接单仍受 Policy 控制。先观察一个范围明确的请求，再决定是否扩大来源和规则。
+3. 在该会话里明确说“启动 `owner/name` 的 Superagent”，或“启动 `https://github.com/5th-Axiom/VideoInWay/tree/codex/video-editing`”。控制台只在缺少仓库时追问，完整保留分支链接。启动工具要求用户已经为该会话选择“完整访问权限”；它只检查权限，不会代为提升。
+4. 左侧 **Superagent** 待机页显示最近 30 次启动历史，包括仓库、分支、开始/结束时间、状态及可用的启动会话/调度会话入口。**新建 Superagent 会话**按钮只打开正确的模式，不发送消息、启动仓库或更改权限。页面不再提供仓库输入框和直接启动按钮；打开历史会话也不会自动恢复运行。
+5. 若显示“需要完成设置”，根据面板的具体错误处理 gh 登录、仓库访问或运行环境，再在面板重新检查。运行后，在 **设置 › 来源 › GitHub** 的 Policy 中填写“能发起工作的 GitHub 账号”，并按需要调整评估规则；允许名单不会自动替用户填写。
+6. 从已允许的账号，在该仓库的 Issue 或评论中发出符合策略的请求。面板显示触发、评估、工单和工作会话；实际接单仍受 Policy 控制。先观察一个范围明确的请求，再决定是否扩大来源和规则。
 
 所选会话是**控制台**，实际调度主会话和工作会话分别创建。“打开主 Session”进入真实调度会话；控制台的一条聊天消息不会自动转成工单。GitHub CLI 用于仓库和账号访问，工作由 Harness 内置 Agent 执行，不接入外部 Codex/Claude CLI。
 
@@ -30,7 +31,7 @@
 git clone https://github.com/JACKWang19559/dsh-superagent-windows.git
 Set-Location dsh-superagent-windows
 powershell -NoProfile -File scripts/build-windows.ps1 `
-  -OutputDirectory '.artifacts/windows-bundle-v3'
+  -OutputDirectory '.artifacts/windows-bundle-v4'
 ```
 
 脚本依次安装锁定的源码依赖（禁用安装脚本），运行类型检查和选定的 Windows 回归，构建并验证打包器，再生成本地安装目录、安装生产依赖，最后实际导入 Host、按需控制台、GitHub、飞书 ESM 入口并检查状态目录配置。它输出交给 Harness `plugin_manager` 的安装参数，不修改 Profile。
@@ -41,7 +42,7 @@ powershell -NoProfile -File scripts/build-windows.ps1 `
 powershell -NoProfile -File scripts/build-windows.ps1 `
   -NodePath 'C:\path\to\node.exe' `
   -PnpmScript 'C:\path\to\pnpm.mjs' `
-  -OutputDirectory 'C:\Tools\Superagent\bundle-v3' `
+  -OutputDirectory 'C:\Tools\Superagent\bundle-v4' `
   -StateDirectory 'C:\Tools\Superagent\state'
 ```
 
@@ -50,9 +51,9 @@ powershell -NoProfile -File scripts/build-windows.ps1 `
 已有新版构建产物时，只生成安装包：
 
 ```powershell
-pnpm bundle:windows --output .artifacts/windows-bundle-v3 --state-dir 'C:\Tools\Superagent\state'
-pnpm --dir .artifacts/windows-bundle-v3 install --prod --ignore-scripts
-node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v3
+pnpm bundle:windows --output .artifacts/windows-bundle-v4 --state-dir 'C:\Tools\Superagent\state'
+pnpm --dir .artifacts/windows-bundle-v4 install --prod --ignore-scripts
+node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v4
 ```
 
 **生成目录必须安装自己的生产依赖。** Harness 本地目录安装使用链接；代码的 bare ESM imports 需要该目录里的依赖，不能借用源码祖先目录的开发版本。生成包只保留运行依赖和兼容目标所需的四个 peers，导入检查会拒绝缺少本地依赖的包。打包器也会在创建输出前拒绝缺少 `on-demand.js` 或按需插件中英文本地化资源的产物。
@@ -64,17 +65,17 @@ node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v3
 ```json
 {
   "action": "install_bundle",
-  "target": "C:\\Tools\\Superagent\\bundle-v3"
+  "target": "C:\\Tools\\Superagent\\bundle-v4"
 }
 ```
 
 不要手动编辑 Profile 的包清单或 Cordis patch，也不要在 Profile 目录运行 pnpm。以安装器的 `application`、`warnings` 和 `nextStep` 为准；`applied` 表示 Host 安装已应用，仍应验证页面实际加载的客户端。首次安装后刷新当前 Harness 窗口，在新会话中选择新增预设；已有会话保留其原预设版本。
 
-**Windows Desktop 将同名插件升级到另一个本地目录后，需要完整退出 Harness 再重新打开。** Desktop `0.2.1-rc.5` 的 Host 会缓存客户端文件路径及内容，桌面进程还保留启动资源清单；单纯刷新页面不能清除这些缓存。使用应用菜单或托盘里的“退出”，不要只关闭窗口（可能只是隐藏到托盘）。重开后，待机页面应显示仓库输入框和“启动 Superagent”按钮。
+**Windows Desktop 将同名插件升级到另一个本地目录后，需要完整退出 Harness 再重新打开。** Desktop `0.2.1-rc.5` 的 Host 会缓存客户端文件路径及内容，桌面进程还保留启动资源清单；单纯刷新页面不能清除这些缓存。使用应用菜单或托盘里的“退出”，不要只关闭窗口（可能只是隐藏到托盘）。重开后，待机页面应显示启动历史和“新建 Superagent 会话”按钮，仓库与分支在会话里提供。
 
 若后台 `/orchestrator/control` 返回 `idle`，页面却仍显示旧版概览标签和“dsh-superagent 没有响应”，先核对实际 `/plugins/` 客户端文件是否含有 `/orchestrator/control`。待机时旧 `/orchestrator/api/state` 返回 404 属于正常行为；不要为了消除旧页面的报错而启动仓库。
 
-本地安装通过链接引用生成目录，**保留该目录及其依赖，不要在已链接目录中重新 build 或覆盖文件**。升级前停止当前仓库并备份状态目录，在新的 `bundle-v3`（以后使用新的版本号）目录生成包，再通过插件管理器安装。停用、卸载和升级都使用插件管理器。安装包、依赖和状态数据均不提交到 Git。
+本地安装通过链接引用生成目录，**保留该目录及其依赖，不要在已链接目录中重新 build 或覆盖文件**。升级前停止当前仓库并备份状态目录，在新的 `bundle-v4`（以后使用新的版本号）目录生成包，再通过插件管理器安装。停用、卸载和升级都使用插件管理器。安装包、依赖和状态数据均不提交到 Git。
 
 ## 仓库状态与旧版数据
 
@@ -83,12 +84,15 @@ Windows 默认根状态目录为 `%LOCALAPPDATA%\dsh-superagent`，位于安装�
 ```text
 <stateDir>/
   launcher.json
+  history.json
   repositories/
     <仓库与可选分支的 SHA-256 前 32 位>/
       orchestrator.sqlite
       work/
       ...
 ```
+
+`history.json` 从本版起记录最近 30 次真实启动，不回填早期版本的运行。它与各仓库的工单数据库独立，读取历史不会打开这些数据库或连接 GitHub。重启后未结束的记录标为“已中断”，未知结束时间留空。若文件损坏或无法保存，页面会提示问题；现有损坏文件保留，仍可停止工作。
 
 `launcher.json` 只记住仓库名和可选分支，不保存凭据，也不表示自动启动。仓库名比较时忽略大小写，分支名区分大小写。未指定分支时仍使用旧版仓库 hash；显式分支使用“仓库小写名 + NUL + 完整分支名”的独立 hash，包括显式填写默认分支名的情况。各目标的工单、策略、模型设置、检查点和工作目录独立保存，不会自动复制另一分支的设置或恢复其任务。停止后数据保留，旧版仅含仓库名的记忆文件仍可读取。
 
@@ -108,12 +112,12 @@ pnpm check:windows
 | --- | --- |
 | 兼容目标 | Harness Desktop `0.2.1-rc.5`；Node.js 24；pnpm `11.7.0` |
 | 生成包 peers | Cordis `4.0.5`、Schemastery `3.18.5`、DSH LLM/Scope `0.2.1-rc.5` |
-| 新版源码检查 | 全部 Runtime 94 项、输入解析 40 项、Launcher 26 项、菜单 14 项、原生 Windows 执行 16 项通过；部署、仓库读取、文档与模型工具检查，以及类型检查和 Host/Client 构建通过 |
+| 新版源码检查 | 自动检查覆盖按需启动、历史持久化与中断恢复、会话导航、菜单过滤、仓库/分支解析、原生 Windows 执行及生产包导入；Windows 入口保留限定 Runtime 筛选 |
 | 安装检查 | 通过 Plugin Manager 安装到新的版本目录，以 `application: applied`、无激活警告和本地控制接口 `idle` 为检查点；这些检查不需要启动目标仓库 |
-| 页面验证边界 | 已实时核对 Client Slot 契约，并以真实 SlotCore/React 测试菜单过滤及选择。独立浏览器没有 Desktop 登录态；升级后需完整退出并重开 Desktop，实际菜单与输入框显示仍需在该窗口确认 |
+| 页面验证边界 | 已核对公开 Client Slot 与会话导航契约，并以真实 SlotCore/React 测试功能。独立浏览器没有 Desktop 登录态；升级后需完整退出并重开 Desktop，在该窗口确认新版历史面板及会话入口 |
 | 外部业务验证 | 尚未以本版完成真实 GitHub 工单到 Windows Worker 的端到端验收 |
 
-状态排查优先使用 `/orchestrator/control`：带 `x-orchestrator-request: 1` 的 GET 只读取本地状态，待机时始终可用。POST 同路径可请求 `start`、`stop` 或 `status`；面板和控制台工具调用同一个 Host 操作。控制接口校验请求标记和浏览器来源，可以用本机命令检查状态。Harness GUI 本身有登录认证；没有 Desktop 登录态的独立浏览器不能完成页面验收。
+状态排查优先使用 `/orchestrator/control`：带 `x-orchestrator-request: 1` 的 GET 只读取本地状态，待机时始终可用。`/orchestrator/history` GET 返回有界启动记录；控制台工具的 `history` 操作也可只读查看。POST control 保持兼容 `start`、`stop`、`status` 和 `history`；侧栏只提供停止操作，启动在会话内完成。工具与面板共用 Host 服务，接口校验请求标记和浏览器来源。Harness GUI 本身有登录认证；没有 Desktop 登录态的独立浏览器不能完成页面验收。
 
 运行状态为 `running` 或 `needs-setup` 且面板可用时，再查看 `/orchestrator/api/state` 和设置/工单页。`idle` 期间旧管理 API 未挂载属于正常现象。若仓库访问失败，确认**当前 gh 登录账号**及 push 权限；若 `gh` 不可用，在终端安装或登录后再通过面板明确重试。查看页面和状态不会偷偷探测 GitHub。
 

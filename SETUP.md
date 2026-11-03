@@ -1,6 +1,6 @@
 # SETUP
 
-Instructions for an agent helping its operator install and use `0.1.0-windows.3`. The current entry is **Superagent · 按需启动** (`superagent`) in the Harness session preset picker. It is an on-demand control console; the separate orchestrator and worker Sessions use Harness built-in Agents.
+Instructions for an agent helping its operator install and use `0.1.0-windows.4`. The current entry is **Superagent · 按需启动** (`superagent`) in the Harness session preset picker. It is an on-demand control console; the separate orchestrator and worker Sessions use Harness built-in Agents.
 
 Use the [Windows guide](README.windows.md) as the authoritative installation and startup procedure for this version. The numbered [architecture documents](docs/000-philosophy.md) remain useful background, but their older always-running Unix service and process-global environment instructions do not describe this entry.
 
@@ -14,7 +14,7 @@ Carry out the operator's actual request and reuse repository names or other choi
 
 Read the preparation and installation sections of the [Windows guide](README.windows.md). The host needs a configured Harness model provider, Git, a native GitHub CLI, PowerShell, and the documented Node/pnpm versions. Do not offer Codex or Claude CLI as an executor or install either as a dependency.
 
-Build into a new independent directory such as `.artifacts/windows-bundle-v3`. The [build script](scripts/build-windows.ps1) performs selected checks, creates the package, installs its production dependencies without install scripts, and runs real ESM import checks. It prints the absolute directory for the Harness `plugin_manager` install call.
+Build into a new independent directory such as `.artifacts/windows-bundle-v4`. The [build script](scripts/build-windows.ps1) performs selected checks, creates the package, installs its production dependencies without install scripts, and runs real ESM import checks. It prints the absolute directory for the Harness `plugin_manager` install call.
 
 Keep `stateDir` outside the bundle. Never rebuild or overwrite a directory already linked by an installed bundle. Stop the active repository and back up the state before an upgrade, create a fresh versioned installation directory, and use the plugin manager. Do not manually edit a profile package manifest or patch. Follow the installer's `application`, `warnings`, and `nextStep` results; a prepared directory alone is not an installed bundle.
 
@@ -24,10 +24,11 @@ Use a new session to verify the public preset after installing a changed revisio
 
 Reuse the operator's chosen `owner/repo`, `/owner/repo`, GitHub repository URL, or `https://github.com/owner/repo/tree/branch` URL. Pass the complete input as `repository`; preserve the entire branch suffix, including slashes and case. Ask for the target only if missing. Start only on the operator's explicit request. Startup discovers the existing native `gh` executable and checks its current login, push access and any selected branch. A missing branch fails instead of falling back to the default. The user does not need a separate token form or a new automation account to use the launcher.
 
-Two entry points share the same Host operation:
+Repository input and startup take place in the Superagent conversation. The sidebar's **New Superagent conversation** button selects the public `superagent` preset without sending a message or starting work; its idle view shows recent history instead of an input form.
 
-- In the selected Superagent console, use `superagent_control` with `action: start` and the requested `repository`. **The user must already have selected Full access for that console session.** The tool checks this requirement; do not change the session's permissions on their behalf.
-- In the Superagent sidebar, the operator enters the repository and presses Start. The button explains that execution sessions use full file access and the currently signed-in gh account.
+Use `superagent_control` with `action: start` and the requested `repository`. **The user must already have selected Full access for that console session.** The tool checks this requirement; do not change the session's permissions on their behalf. The caller's console id is recorded automatically, never supplied as a model argument.
+
+Use `action: history` for the latest 30 startup records, including repository, branch, timestamps, state and known console/orchestrator ids. It is local and read-only, including in a read-only session. Opening an old conversation does not authorize resuming its repository.
 
 Use `action: status` to read local launch status without probing GitHub. Report `idle`, `starting`, `running`, `needs-setup`, `stopping`, or `error` as returned. If setup is incomplete, explain the reported problem and direct the operator to the panel to fix the CLI/account/repository setting and retry the check. Do not call a setup failure a running worker.
 
@@ -46,6 +47,8 @@ Requests enter through configured GitHub sources and must pass the Policy. A mes
 On the operator's stop request, use `superagent_control` with `action: stop`, or direct them to the panel's Stop this repository button. Stop cancels repository polling/listeners and running worker Agents. Wait for the returned stopped/idle status before describing it as complete. Closing the panel does not stop the repository.
 
 Harness/plugin cold restarts always return to idle. Do not add a reminder, scheduled start, service wrapper, or automatic resume as part of this setup.
+
+The independent `history.json` journal retains the latest 30 startup records. Interrupted records have no invented completion time. Earlier launches are not reconstructed from ticket databases. History read/write problems are visible and must not prevent stopping workers; preserve a corrupt journal before repairing it.
 
 Each repository and optional explicit branch has its own `repositories/<hash>` directory under `stateDir`. The hash is the first 32 hexadecimal characters of SHA-256 of the lowercased `owner/repo`, plus NUL and the exact branch when specified. Omitted branches retain the existing repository hash. Settings, checkpoints, Tickets and workspaces stay separate across targets. The launcher record remembers the repository and optional branch without auto-resuming. **The historical root database is preserved without automatic migration or rewriting.** Keeping the old `stateDir` does not import its old database into this layout.
 

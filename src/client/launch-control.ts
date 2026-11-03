@@ -1,9 +1,9 @@
-/** Local supervisor status and explicit start/stop requests; reading status never starts a repository. */
+/** Local supervisor status and explicit stop requests; repository startup belongs to the Superagent session. */
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { LaunchPhase, LaunchRequest, LaunchStatus } from '../on-demand/types.ts'
 import { errorText, type T } from './text.ts'
 
-type Mutation = Exclude<LaunchRequest, { action: 'status' }>
+type Mutation = Extract<LaunchRequest, { action: 'stop' }>
 interface View {
   status?: LaunchStatus
   pending?: Mutation['action']
@@ -19,6 +19,7 @@ function isStatus(value: unknown): value is LaunchStatus {
   return phases.includes(state.phase as LaunchPhase) && state.executor === 'harness' && typeof state.panelAvailable === 'boolean'
     && nullableString(state.repository) && nullableString(state.lastRepository) && nullableString(state.masterId) && nullableString(state.error)
     && (state.branch === undefined || nullableString(state.branch)) && (state.lastBranch === undefined || nullableString(state.lastBranch))
+    && (state.consoleId === undefined || nullableString(state.consoleId))
 }
 async function request(t: T, signal: AbortSignal, body?: Mutation): Promise<LaunchStatus> {
   let response: Response
@@ -37,7 +38,7 @@ async function request(t: T, signal: AbortSignal, body?: Mutation): Promise<Laun
     throw new Error(typeof failure?.error === 'string' ? failure.error : t('requestFailed', { status: response.status }))
   }
   if (!isStatus(value)) throw new Error(t('launcher.invalidResponse'))
-  return { ...value, branch: value.branch ?? null, lastBranch: value.lastBranch ?? null }
+  return { ...value, branch: value.branch ?? null, lastBranch: value.lastBranch ?? null, consoleId: value.consoleId ?? null }
 }
 
 /** Serializes status polling, cancels stale reads before mutations, and disposes all requests and timers on unmount. */
