@@ -297,6 +297,10 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/on-demand/controller.ts` | `Launcher`: validates inputs, serializes start/stop, handles cancellation/failure and records startup history with live status overlays; reads never start work |
 | `src/on-demand/host.ts` | `SuperagentControl`: creates one Runtime in its repository's hashed state directory, seeds new settings and the clone/branch prepare command, remembers the last repository without auto-resuming, and disposes the Runtime on stop |
 | `src/on-demand/http.ts` | Always-available `/orchestrator/control` and `/orchestrator/history`, same-origin and argument checks, and dispatch shared with the console tool |
+| `src/on-demand/project-types.ts` | Session-scoped project identity, resolution, saved ticket summary and launch-history response contracts |
+| `src/on-demand/project-git.ts` | Bounded cached local Git identity, branch-upstream selection, GitHub remote normalization, default-branch evidence and cancellation |
+| `src/on-demand/project-db.ts` | Schema-11 snapshots on the active Runtime connection or immutable stopped database, saved target validation, bounded ticket counts and recent records; no Store construction or migration |
+| `src/on-demand/project.ts` | Always-available GET project overview resolved from Session workspace membership, filtered by exact repository/branch, with verified saved Session links |
 | `src/on-demand/preset.ts` | The `./on-demand` preset plugin: registers startup guidance and the scoped `superagent_control` tool, requires the control session already to have Full access for start, and does not activate a repository on selection |
 | `src/deployment.ts` | The plugin `Config` and `Machine`; `resolveDeployment` and `resolveFeishuBot` read the repository and the accounts from the Source settings, each CLI run as Executor shells run it; `SETUP_FIELDS` lists the Source fields setup reads. The code names no person, account or organization |
 | `src/setup.ts` | Setup problems: `SetupError`, with a code, the place that fixes it and the English text the log, the main Session and the panel share |
@@ -381,7 +385,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/sources/feishu-read.ts` | The `feishu/` reads of a Trigger's message, its root, parent and topic, and `feishuThreadContext`, which gives them to assessments with their images |
 | `src/sources/admission-context.ts` | The bounded window an assessment starts from: the first pages of a Trigger's Thread, read through its kind, and the messages around the Trigger |
 | `src/sources/feishu-image.ts` | Reads a Feishu message's image as an attachment for the assessing Session |
-| `src/client/index.tsx` | The client plugin entry: the sidebar entry, the main panel and the page in DeepSeek Harness's Plugin Manager |
+| `src/client/index.tsx` | The client plugin entry: the project conversation View after Trajectory, sidebar entry, main panel and Plugin Manager page |
+| `src/client/project.tsx` | Read-only project conversation overview, scoped response validation, cancelled/stale request handling, saved ticket/history display and workspace-specific conversation navigation |
 | `src/client/launch-control.ts` | `useLaunchControl`: validates launch responses, polls local status, submits explicit actions, ignores stale requests, reconciles failures and cleans up polling on unmount |
 | `src/client/preset-picker.tsx` | Delegates the public new-session Slot to the shipped picker while filtering the two internal Superagent presets; preserves the Host registry and restores the original on unload |
 | `src/client/launcher.tsx` | Conversation creation and navigation, recent history while idle, current status/stop controls, and the existing panel while its Runtime is available; no repository form or UI start request |
@@ -457,6 +462,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `tests/client.spec.tsx`, `tests/navigation.spec.ts`, `tests/controls.spec.tsx` | The client plugin's registration and polling, Session navigation and route memory, the local controls, and the panel's imports, which have no cycle |
 | `tests/preset-picker.spec.tsx` | Exact internal preset filtering, delegated selection and descriptions, stale selection repair for new sessions, Slot lifecycle and third-party replacements |
 | `tests/launcher.spec.tsx` | Idle GET-only mounting and conversation creation, no form/start POST, current management/stop and console links, lifecycle errors and polling cleanup |
+| `tests/project.spec.ts` | Session workspace resolution, native local Git remotes/branches, project isolation, read-only saved snapshots and real project endpoint routing |
+| `tests/project-panel.spec.tsx` | Project overview/empty/error states, scoped navigation, Session switching, late response rejection and read-only requests |
 | `tests/history-panel.spec.tsx` | History empty/loading/error states, record validation, session navigation, independent refresh/polling and unmount cleanup |
 | `tests/history.spec.ts` | Durable bounded startup history, concurrency and cancellation, timestamps/session ids, cold interruption, schema validation and corrupt/unwritable storage |
 | `tests/panel-overview.spec.tsx`, `panel-source.spec.tsx`, `panel-trigger.spec.tsx`, `panel-eval.spec.tsx`, `panel-execution.spec.tsx` | Each page of the panel, against a fake management API answered by route |

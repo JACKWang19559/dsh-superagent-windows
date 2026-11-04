@@ -33,7 +33,8 @@ async function render(entry: Entry, props: Record<string, unknown>) {
   const root = createRoot(container)
   await act(async () => { root.render(<entry.component {...props} />) })
   for (let i = 0; i < 5; i++) await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)) })
-  return { container, dispose: () => { act(() => { root.unmount() }); container.remove() } }
+  return { container, update: async (next: Record<string, unknown>) => { await act(async () => { root.render(<entry.component {...next} />) }) },
+    dispose: () => { act(() => { root.unmount() }); container.remove() } }
 }
 const openMaster = async (container: HTMLElement) => {
   const button = [...container.querySelectorAll('button')].find(item => item.textContent === zh.openMaster)!
@@ -54,8 +55,11 @@ afterEach(() => { vi.unstubAllGlobals() })
 
 it('registers a localized main panel, sidebar entry and Plugin Manager row page, and no settings section', () => {
   const { entries, dictionaries, main, nav } = fixture([])
-  expect(entries.map(entry => entry.options.name)).toEqual(['main', 'sidebar.panellist', 'plugins.row.config'])
-  expect(entries[2]!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
+  expect(entries.map(entry => entry.options.name)).toEqual(['main', 'conversation.view', 'sidebar.panellist', 'plugins.row.config'])
+  expect(entries.find(entry => entry.options.name === 'plugins.row.config')!.options).toMatchObject({ key: 'dsh-superagent#dsh-superagent', locale: 'dshSuperagent' })
+  const project = entries.find(entry => entry.options.name === 'conversation.view')!
+  expect(project.options).toMatchObject({ id: 'dsh-superagent', order: 11, locale: 'dshSuperagent' })
+  expect(project.options.label?.()).toBe('Superagent')
   expect(Object.keys(dictionaries)).toEqual(['dshSuperagent'])
   expect(main.options).toMatchObject({ key: 'dsh-superagent', locale: 'dshSuperagent' })
   expect(nav.options).toMatchObject({ id: 'dsh-superagent', order: 10, locale: 'dshSuperagent' })
@@ -72,6 +76,49 @@ it('opens a new Superagent session with no draft override, message, repository s
   expect(ctx.uiWorkspace.openSession).not.toHaveBeenCalled()
   expect(vi.mocked(fetch).mock.calls.every(([, init]) => init?.method === 'GET' && init.body === undefined)).toBe(true)
   expect(view.container.querySelector('input')).toBeNull()
+  view.dispose()
+})
+
+it('opens a project Superagent conversation in the viewed Session workspace without sending or starting work', async () => {
+  vi.stubGlobal('fetch', vi.fn(async () => Response.json({
+    sessionId: 'project-session', workspace: { id: 'workspace-a', title: 'Widgets', path: '/widgets', source: 'registry' },
+    repository: 'acme/widgets', branch: 'feature/project-tab', defaultBranch: 'main', source: 'git', reason: null,
+    status: null, history: { entries: [], limit: 30, error: null }, summary: null, summaryError: null, error: null,
+  })))
+  const { ctx, entries } = fixture([])
+  const entry = entries.find(item => item.options.name === 'conversation.view')!
+  const view = await render(entry, { t, sessionId: 'project-session' })
+  const button = [...view.container.querySelectorAll('button')].find(item => item.textContent === zh['project.newSession'])!
+  await act(async () => { button.click() })
+  expect(ctx.uiWorkspace.startSession).toHaveBeenCalledExactlyOnceWith('workspace-a', { agentPreset: 'superagent' })
+  expect(vi.mocked(fetch)).toHaveBeenCalledExactlyOnceWith('/orchestrator/project?sessionId=project-session', expect.objectContaining({ method: 'GET' }))
+  expect(ctx.uiWorkspace.openSession).not.toHaveBeenCalled()
+  view.dispose()
+})
+
+it('cancels a pending project Session navigation when the viewed conversation changes', async () => {
+  const listed: string[] = []
+  let finishRefresh: () => void = () => {}
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const sessionId = new URL(url, 'http://localhost').searchParams.get('sessionId')
+    return Response.json({ sessionId, workspace: { id: 'workspace-a', title: 'Widgets', path: '/widgets', source: 'registry' },
+      repository: 'acme/widgets', branch: 'main', defaultBranch: 'main', source: 'git', reason: null, status: null,
+      history: { entries: [], limit: 30, error: null }, summary: sessionId === 'project-a' ? {
+        source: 'saved', counts: { total: 0, open: 0, person: 0, working: 0, idle: 0, ended: 0 }, recentTickets: [],
+        maxWorkers: 3, paused: false, masterId: 'late-master', updatedAt: null,
+      } : null, summaryError: null, error: null,
+    })
+  }))
+  const { ctx, entries } = fixture(listed)
+  ctx.sessions.refresh.mockImplementationOnce(() => new Promise<void>(resolve => { finishRefresh = resolve }))
+  const entry = entries.find(item => item.options.name === 'conversation.view')!
+  const view = await render(entry, { t, sessionId: 'project-a' })
+  await act(async () => { [...view.container.querySelectorAll('button')].find(button => button.textContent === zh.openMaster)!.click() })
+  expect(ctx.sessions.refresh).toHaveBeenCalledOnce()
+  await view.update({ t, sessionId: 'project-b' })
+  listed.push('late-master')
+  await act(async () => { finishRefresh() })
+  expect(ctx.uiWorkspace.openSession).not.toHaveBeenCalled()
   view.dispose()
 })
 

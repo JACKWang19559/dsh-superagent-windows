@@ -3,6 +3,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-settings'
 import { SuperagentControl } from './on-demand/host.ts'
 import { registerLaunchHttp } from './on-demand/http.ts'
+import { registerProjectHttp } from './on-demand/project.ts'
 import { Config, machineOf, type DeploymentConfig } from './deployment.ts'
 
 export const name = 'dsh-superagent'
@@ -14,7 +15,8 @@ export async function apply(ctx: Context, config: DeploymentConfig): Promise<voi
   ctx.inject(['settings'], child => { child.effect(() => child.settings.configure({ auto: false }, ctx.fiber)) })
   const control = new SuperagentControl(ctx, machine)
   ctx.effect(() => registerLaunchHttp(ctx, control))
-  ctx.logger.info('Superagent is idle; select the Superagent preset in a new session or start a repository from the sidebar')
+  ctx.effect(() => registerProjectHttp(ctx, control, machine.stateDir))
+  ctx.logger.info('Superagent is idle; open a project Superagent conversation and explicitly request repository startup')
 }
 export type { Deployment, DeploymentConfig } from './deployment.ts'
 export * from './core/index.ts'

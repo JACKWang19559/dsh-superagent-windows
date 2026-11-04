@@ -7,11 +7,14 @@ import type {} from '@deepseek-ai/dsh-client-locale/client'
 import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
 import type {} from '@deepseek-ai/dsh-client-ui-workspace/client'
 import type {} from '@deepseek-ai/dsh-client-ui-settings/client'
+import type { ConvViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
 import type { PluginConfigViewProps } from '@deepseek-ai/dsh-client-ui-plugin-manager/client'
 import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { openKnownSession, SessionNavigationError } from '../navigation.ts'
 import { Launcher } from './launcher.tsx'
+import { ProjectPanel } from './project.tsx'
 import { registerPresetPicker } from './preset-picker.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
@@ -28,8 +31,8 @@ function HammerIcon({ size }: SidebarPanelIconOwnerProps) {
   </svg>
 }
 
-/** Mounted panel wrapper; cancels any pending Session navigation when a new one starts or the panel unmounts. */
-function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
+/** Keep Session navigation within its mounted view and cancel superseded requests. */
+function useNavigation(ctx: ClientContext, t: T) {
   const pending = useRef<AbortController>(undefined)
   useEffect(() => () => { pending.current?.abort() }, [])
   const openSession = useCallback(async (id: string) => {
@@ -42,12 +45,27 @@ function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
       throw error
     }
   }, [ctx, t])
-  const startSession = useCallback(() => {
+  const startSession = useCallback((workspaceId?: Parameters<ClientContext['uiWorkspace']['startSession']>[0]) => {
     pending.current?.abort()
-    ctx.uiWorkspace.startSession(undefined, { agentPreset: 'superagent' })
+    // rc.5's inspected public contract adds agentPreset; the alpha development declarations predate it.
+    const options = { agentPreset: 'superagent' } as Parameters<ClientContext['uiWorkspace']['startSession']>[1] & { agentPreset: string }
+    ctx.uiWorkspace.startSession(workspaceId, options)
   }, [ctx])
+  return { openSession, startSession }
+}
+
+/** Global sidebar retains the existing all-project launcher and management controls. */
+function Mounted({ ctx, t }: { ctx: ClientContext; t: T }) {
+  const { openSession, startSession } = useNavigation(ctx, t)
   const form = usePageForm(ctx.get('configForms')?.get<Record<string, unknown>>(ENTRY))
   return <Launcher t={t} openSession={openSession} startSession={startSession} deploymentForm={form} />
+}
+
+/** The selected Session identity, rather than the global panel selection, scopes this view. */
+function MountedProject({ ctx, t, sessionId }: { ctx: ClientContext; t: T; sessionId: SessionId }) {
+  const { openSession, startSession } = useNavigation(ctx, t)
+  return <ProjectPanel sessionId={sessionId} t={t} openSession={openSession}
+    startSession={workspaceId => startSession(workspaceId as Parameters<typeof startSession>[0])} />
 }
 
 export const inject = ['slots', 'locale', 'sessions', 'uiWorkspace']
@@ -58,6 +76,9 @@ export function apply(ctx: ClientContext): void {
   const t = ctx.locale.bind(NS)
   ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: PANEL_ID, locale: NS, inject: () => ({}) },
     (props: { t: T }) => <Mounted ctx={ctx} t={props.t} />))
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({ name: 'conversation.view', id: ENTRY, order: 11,
+    label: () => t('panel'), locale: NS },
+    (props: ConvViewProps & { t: T }) => <MountedProject key={props.sessionId} ctx={ctx} t={props.t} sessionId={props.sessionId} />))
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 10, label: () => t('panel'), locale: NS }, HammerIcon))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register({ name: 'plugins.row.config', key: `${ENTRY}#${ENTRY}`, locale: NS },
     (props: PluginConfigViewProps & { t: T }) => <PluginConfig t={props.t} view={props.view} form={props.form} />))

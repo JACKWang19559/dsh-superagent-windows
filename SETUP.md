@@ -1,6 +1,6 @@
 # SETUP
 
-Instructions for an agent helping its operator install and use `0.1.0-windows.5`. The current entry is **Superagent · 按需启动** (`superagent`) in the Harness session preset picker. It is an on-demand control console; the separate orchestrator and worker Sessions use Harness built-in Agents.
+Instructions for an agent helping its operator install and use `0.1.0-windows.6`. The current entry is **Superagent · 按需启动** (`superagent`) in the Harness session preset picker. It is an on-demand control console; the separate orchestrator and worker Sessions use Harness built-in Agents.
 
 Use the [Windows guide](README.windows.md) as the authoritative installation and startup procedure for this version. The numbered [architecture documents](docs/000-philosophy.md) remain useful background, but their older always-running Unix service and process-global environment instructions do not describe this entry.
 
@@ -14,11 +14,13 @@ Carry out the operator's actual request and reuse repository names or other choi
 
 Read the preparation and installation sections of the [Windows guide](README.windows.md). The host needs a configured Harness model provider, Git, a native GitHub CLI, PowerShell, and the documented Node/pnpm versions. Do not offer Codex or Claude CLI as an executor or install either as a dependency.
 
-Build into a new independent directory such as `.artifacts/windows-bundle-v5`. The [build script](scripts/build-windows.ps1) performs selected checks, creates the package, installs its production dependencies without install scripts, and runs real ESM import checks. It prints the absolute directory for the Harness `plugin_manager` install call.
+Build into a new independent directory such as `.artifacts/windows-bundle-v6`. The [build script](scripts/build-windows.ps1) performs selected checks, creates the package, installs its production dependencies without install scripts, and runs real ESM import checks. It prints the absolute directory for the Harness `plugin_manager` install call.
 
 Keep `stateDir` outside the bundle. Never rebuild or overwrite a directory already linked by an installed bundle. Stop the active repository and back up the state before an upgrade, create a fresh versioned installation directory, and use the plugin manager. Do not manually edit a profile package manifest or patch. Follow the installer's `application`, `warnings`, and `nextStep` results; a prepared directory alone is not an installed bundle.
 
 Use a new session to verify the public preset after installing a changed revision. Existing sessions retain the revision they selected. Desktop `0.2.1-rc.5` caches the linked client bundle: after an upgrade that changes client code, fully quit Harness through the application or tray menu and reopen it. A page refresh is insufficient. A Host-only fix with identical client artifacts (windows.4 → windows.5) needs no client reload when installation reports `application: applied`. The new-session picker hides the internal router and worker modes while keeping them registered for internal use.
+
+The Superagent View follows Chat and Trajectory in every started project conversation, regardless of its preset. It uses the viewed Session's workspace and local Git upstream to select repository/branch status, saved tickets and matching launch history. Its reads do not activate Agents or call GitHub; unknown/ambiguous projects have explicit empty states. The project new-conversation action uses that workspace, sends nothing and changes no permissions. The sidebar remains the global management entry. windows.6 changes Client code and requires the Desktop quit/reopen described above.
 
 ## 2. Start the chosen repository
 

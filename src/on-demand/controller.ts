@@ -3,6 +3,7 @@ import { z } from 'zod'
 import type { LaunchControl, LaunchHistory, LaunchHistoryPhase, LaunchPhase, LaunchStatus } from './types.ts'
 import { HistorySessionId, LaunchHistoryStore } from './history.ts'
 import { parseRepositoryInput, repositoryInput, sameRepositoryTarget, type RepositoryTarget } from './repository.ts'
+import type { ProjectSnapshot } from './project-db.ts'
 
 export const RepositorySchema = z.string().trim().max(2048).refine(value => !!parseRepositoryInput(value),
   'Use owner/repo, a GitHub repository URL, or https://github.com/owner/repo/tree/branch (the whole suffix is the branch)')
@@ -15,6 +16,8 @@ export const LaunchRequestSchema = z.discriminatedUnion('action', [
 export interface ActiveRun {
   view(): Pick<LaunchStatus, 'phase' | 'masterId' | 'panelAvailable' | 'error'>
   stop(): Promise<void>
+  /** Optional read-only snapshot of this captured run's existing database connection. */
+  summary?(): ProjectSnapshot | undefined
 }
 export type LaunchFactory = (target: RepositoryTarget, signal: AbortSignal) => Promise<ActiveRun>
 /** A launch request conflicts with the active repository or a lifecycle transition. */
@@ -64,6 +67,12 @@ export class Launcher implements LaunchControl {
       phase: historyPhase(status.phase), masterId: status.masterId ?? entry.masterId,
       error: status.error?.slice(0, 4000) ?? null } : entry)
     return result
+  }
+  /** Only the exact active namespace can expose its captured connection; reads never activate a run. */
+  summary(target: RepositoryTarget): ProjectSnapshot | undefined {
+    if (this.closed || this.stopping || !this.target || !sameRepositoryTarget(this.target, target)) return undefined
+    try { return this.active?.summary?.() }
+    catch { return { summary: null, error: 'Saved project data could not be read from the active run.' } }
   }
   async start(input: string, consoleId?: string): Promise<LaunchStatus> {
     const target = parseRepositoryInput(RepositorySchema.parse(input))!

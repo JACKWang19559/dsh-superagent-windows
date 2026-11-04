@@ -38,7 +38,7 @@ test('prepares a CRLF checkout with Unicode paths, metadata and runtime peers wi
   assert.equal(manifest.scripts, undefined);
   assert.equal(manifest.devDependencies, undefined);
   assert.equal(manifest.license, 'MIT');
-  assert.equal(manifest.version, '0.1.0-windows.5');
+  assert.equal(manifest.version, '0.1.0-windows.6');
   assert.equal(manifest.exports['./on-demand'], './lib/on-demand.js');
   assert.ok((await stat(join(target, 'lib', 'on-demand.js'))).isFile());
   assert.equal(await readFile(join(target, 'LICENSE'), 'utf8'), await readFile(join(source, 'LICENSE'), 'utf8'));

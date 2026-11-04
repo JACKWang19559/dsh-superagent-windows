@@ -9,6 +9,7 @@ import { Runtime } from '../app/runtime.ts'
 import { Store } from '../app/store.ts'
 import { Launcher, LaunchFailure, RepositorySchema, type ActiveRun } from './controller.ts'
 import { LaunchHistoryStore } from './history.ts'
+import { readProjectSnapshot, type ProjectSnapshot } from './project-db.ts'
 import { isValidBranch, parseRepositoryInput, repositoryInput, type RepositoryTarget } from './repository.ts'
 import type { LaunchControl, LaunchHistory, LaunchStatus } from './types.ts'
 
@@ -68,6 +69,7 @@ export class SuperagentControl extends Service implements LaunchControl {
   }
   status(): LaunchStatus { return this.launcher.status() }
   history(): LaunchHistory { return this.launcher.history() }
+  summary(target: RepositoryTarget): ProjectSnapshot | undefined { return this.launcher.summary(target) }
   start(repository: string, consoleId?: string): Promise<LaunchStatus> { return this.launcher.start(repository, consoleId) }
   stop(): Promise<LaunchStatus> { return this.launcher.stop() }
   private async activate(ctx: Context, { repository, branch }: RepositoryTarget, signal: AbortSignal): Promise<ActiveRun> {
@@ -113,7 +115,9 @@ export class SuperagentControl extends Service implements LaunchControl {
       signal.throwIfAborted()
       mkdirSync(this.machine.stateDir, { recursive: true, mode: 0o700 })
       writeFileSync(join(this.machine.stateDir, 'launcher.json'), JSON.stringify({ repository, branch }) + '\n', { mode: 0o600 })
-      return { stop, view: () => ({ phase: restartError ? 'error' : !ready ? 'starting' : runtime!.configured() ? 'running' : 'needs-setup',
+      return { stop, summary: () => ready && !disposed && !stopped && runtime
+        ? readProjectSnapshot(runtime.store.db, { repository, branch }) : undefined,
+        view: () => ({ phase: restartError ? 'error' : !ready ? 'starting' : runtime!.configured() ? 'running' : 'needs-setup',
         masterId: ready && runtime!.configured() ? runtime!.masterId : null, panelAvailable: ready && !restartError && !stopped,
         error: restartError ?? runtime!.setupProblem?.detail ?? null }) }
     } catch (error) {

@@ -37,10 +37,10 @@ it('defines the selectable on-demand console separately from the internal router
   expect(rows.find(row => row.id === 'dsh-superagent-feishu')?.disabled).toBe(true)
 })
 
-it('exports the on-demand entry and packaged bilingual display resources in windows.5', () => {
+it('exports the on-demand entry and packaged bilingual display resources in windows.6', () => {
   const root = join(import.meta.dirname, '..')
   const manifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
-  expect(manifest.version).toBe('0.1.0-windows.5')
+  expect(manifest.version).toBe('0.1.0-windows.6')
   expect(manifest.exports['./on-demand']).toBe('./lib/on-demand.js')
   const pattern = manifest.exports['./on-demand/locale/*.json'] as string
   expect(manifest.files).toContain(pattern.replace(/^\.\//, ''))
@@ -55,7 +55,7 @@ it('exports the on-demand entry and packaged bilingual display resources in wind
   const svg = readFileSync(join(root, icon), 'utf8')
   expect(svg).toContain('<svg xmlns="http://www.w3.org/2000/svg"')
   expect(Buffer.byteLength(svg)).toBeLessThanOrEqual(256 * 1024)
-  for (const test of ['tests/on-demand.spec.ts', 'tests/history.spec.ts', 'tests/launcher.spec.tsx', 'tests/history-panel.spec.tsx', 'tests/windows-execution.spec.ts']) {
+  for (const test of ['tests/on-demand.spec.ts', 'tests/history.spec.ts', 'tests/launcher.spec.tsx', 'tests/history-panel.spec.tsx', 'tests/project.spec.ts', 'tests/project-panel.spec.tsx', 'tests/windows-execution.spec.ts']) {
     expect(manifest.scripts['test:windows'].split(' && ')[0]).toContain(test)
   }
   expect(manifest.scripts['test:windows']).toContain('vitest run tests/runtime.spec.ts -t "Windows|refuses the main Session|restricts the main Session"')

@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Superagent",
-    "description": "Explicitly start a GitHub repository in a Superagent conversation with Harness Agents; review run history, status, settings and authorized Tickets in the sidebar."
+    "description": "Review the current project's repository, Tickets and launch history in every conversation's Superagent tab; explicitly start authorized work in a Superagent conversation with Harness Agents."
   }
 }

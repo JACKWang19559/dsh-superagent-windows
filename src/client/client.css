@@ -20,6 +20,21 @@
 .dt-launch-heading strong { font-weight: 500; }
 .dt-launch-stop-hint, .dt-launchbar-content > .dt-launch-error { flex-basis: 100%; }
 .dt-launch-error { white-space: pre-wrap; overflow-wrap: anywhere; }
+/* Session project View uses the existing conversation tab row and an independent scrolling body. */
+.dt-project { flex: 1; min-height: 0; }
+.dt-project .dt-card { border-color: var(--dsw-alias-border-l1); }
+.dt-project .dt-hint { color: var(--dsw-alias-label-secondary); }
+.dt-project-identity { gap: 14px; }
+.dt-project-path { margin: 0; font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-secondary); overflow-wrap: anywhere; }
+.dt-project-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 20px; margin: 0; font-size: 13px; line-height: 20px; }
+.dt-project-facts dt { color: var(--dsw-alias-label-secondary); }
+.dt-project-facts dd { margin: 0; overflow-wrap: anywhere; }
+.dt-project-command { padding: 10px 12px; border-radius: 8px; background: var(--dsw-alias-bg-layer-1); color: var(--dsw-alias-label-primary); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 20px; }
+.dt-project-summary { gap: 16px; }
+.dt-project-metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 16px; margin: 0; }
+.dt-project-metrics dt { color: var(--dsw-alias-label-secondary); font-size: 12px; line-height: 20px; }
+.dt-project-metrics dd { margin: 4px 0 0; font-size: 26px; line-height: 32px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.dt-project-caption { font-size: 12px; line-height: 20px; color: var(--dsw-alias-label-secondary); }
 /* Deployment page rendered inside DSH Plugin Manager, which owns scrolling and padding. */
 .dt-embedded { container-type: inline-size; color: var(--dsw-alias-label-primary); }
 /* Disable sticky positioning inside DSH Plugin Manager, where the host container owns scrolling and bottom padding. */

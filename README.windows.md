@@ -2,7 +2,7 @@
 
 这是 [DeepSeek Harness SuperAgent 研究原型](https://github.com/deepseek-ai/dsh-superagent-prototype)的社区 fork，发布在 [JACKWang19559/dsh-superagent-windows](https://github.com/JACKWang19559/dsh-superagent-windows)。保留上游源码、提交历史、版权与 [MIT 许可证](LICENSE)，不是 DeepSeek 官方 Windows 产品。
 
-**`0.1.0-windows.5` 默认待机。** 在新建会话时选择 **Superagent · 按需启动**，填写 GitHub 仓库名或分支链接并明确启动后，才检查账号、连接 GitHub 和运行仓库编排。执行器使用 Harness 内置 Agent。主 Session 和执行器预设仅供内部创建，从新建会话的模式菜单隐藏。
+**`0.1.0-windows.6` 默认待机。** 在新建会话时选择 **Superagent · 按需启动**，填写 GitHub 仓库名或分支链接并明确启动后，才检查账号、连接 GitHub 和运行仓库编排。执行器使用 Harness 内置 Agent。主 Session 和执行器预设仅供内部创建，从新建会话的模式菜单隐藏。
 
 ## 使用方式
 
@@ -21,6 +21,16 @@
 
 一次只运行一个仓库与分支。点 **停止此仓库**，或在控制台明确要求停止，会取消该目标的 GitHub 轮询、监听和工作 Agent；完成后回到待机。切换仓库或分支前先停止当前目标。关闭管理面板不会停止后台工作；Harness 或插件冷重启后总是待机，即使已记住上次仓库和分支，也需要再次明确启动。飞书来源仍默认禁用。
 
+## 每个会话的项目入口
+
+任意预设的项目会话在发出首条消息后，顶部 **对话 › 轨迹** 后增加 **Superagent** 标签。窗口较窄时，Harness 可能将后面的标签收进 **…** 菜单。此入口读取当前会话所属工作区，展示仓库、工作分支、匹配目标的运行状态、已保存的工单概况、最近工单及启动记录；可打开已知的调度、工作和启动会话。侧栏仍保留跨项目的全局管理入口。
+
+项目身份来自原会话目录的本地 Git 信息，优先使用当前分支跟踪的远程仓库，避免 fork 的 `origin` 指向上游时误认项目。没有上游且存在多个不同 GitHub 远程仓库时，明确提示无法确定，不按全局运行目标猜测。分支区分大小写；未指定分支的启动记录仅在本地远程 HEAD 能证明是当前分支时才可匹配。非 Git 目录、非 GitHub 项目、分离 HEAD、缺失目录或没有保留记录都有对应提示。
+
+打开、刷新或切换此标签不会连接 GitHub、恢复 Agent、创建运行目录或启动仓库。工单数据以只读方式查看，停止后的执行阶段是已保存状态，不代表工作仍在运行。**新建项目 Superagent 会话**只在当前项目工作区打开对应预设，不覆盖草稿、不发消息、不更改权限；需要工作时再在该会话中明确提出启动请求。
+
+windows.6 更新了客户端。Desktop `0.2.1-rc.5` 安装后需通过应用菜单或托盘 **退出** Harness，再重新打开，才能加载新标签；单纯刷新不足以清除旧客户端缓存。
+
 ## 准备环境和安装包
 
 需要 Git、GitHub CLI、Windows PowerShell 5.1（也支持 PowerShell 7）、Node.js 24、pnpm 11.7.0，以及已配置模型服务的 DeepSeek Harness Desktop。Windows 来源 CLI 必须是原生 `.exe` 或 `.com`；`.cmd`、`.bat`、`.ps1` 不能作为来源 CLI 配置。GitHub 账号与 push 权限只在明确启动后检查。
@@ -31,7 +41,7 @@
 git clone https://github.com/JACKWang19559/dsh-superagent-windows.git
 Set-Location dsh-superagent-windows
 powershell -NoProfile -File scripts/build-windows.ps1 `
-  -OutputDirectory '.artifacts/windows-bundle-v5'
+  -OutputDirectory '.artifacts/windows-bundle-v6'
 ```
 
 脚本依次安装锁定的源码依赖（禁用安装脚本），运行类型检查和选定的 Windows 回归，构建并验证打包器，再生成本地安装目录、安装生产依赖，最后实际导入 Host、按需控制台、GitHub、飞书 ESM 入口并检查状态目录配置。它输出交给 Harness `plugin_manager` 的安装参数，不修改 Profile。
@@ -42,7 +52,7 @@ powershell -NoProfile -File scripts/build-windows.ps1 `
 powershell -NoProfile -File scripts/build-windows.ps1 `
   -NodePath 'C:\path\to\node.exe' `
   -PnpmScript 'C:\path\to\pnpm.mjs' `
-  -OutputDirectory 'C:\Tools\Superagent\bundle-v5' `
+  -OutputDirectory 'C:\Tools\Superagent\bundle-v6' `
   -StateDirectory 'C:\Tools\Superagent\state'
 ```
 
@@ -51,9 +61,9 @@ powershell -NoProfile -File scripts/build-windows.ps1 `
 已有新版构建产物时，只生成安装包：
 
 ```powershell
-pnpm bundle:windows --output .artifacts/windows-bundle-v5 --state-dir 'C:\Tools\Superagent\state'
-pnpm --dir .artifacts/windows-bundle-v5 install --prod --ignore-scripts
-node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v5
+pnpm bundle:windows --output .artifacts/windows-bundle-v6 --state-dir 'C:\Tools\Superagent\state'
+pnpm --dir .artifacts/windows-bundle-v6 install --prod --ignore-scripts
+node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v6
 ```
 
 **生成目录必须安装自己的生产依赖。** Harness 本地目录安装使用链接；代码的 bare ESM imports 需要该目录里的依赖，不能借用源码祖先目录的开发版本。生成包只保留运行依赖和兼容目标所需的四个 peers，导入检查会拒绝缺少本地依赖的包。打包器也会在创建输出前拒绝缺少 `on-demand.js` 或按需插件中英文本地化资源的产物。
@@ -65,7 +75,7 @@ node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v5
 ```json
 {
   "action": "install_bundle",
-  "target": "C:\\Tools\\Superagent\\bundle-v5"
+  "target": "C:\\Tools\\Superagent\\bundle-v6"
 }
 ```
 
@@ -77,7 +87,7 @@ node scripts/check-bundle-import.mjs .artifacts/windows-bundle-v5
 
 若 `/orchestrator/control` 为 `running`，管理页却提示“没有响应”，且 `/orchestrator/api/state` 返回空的 404，请升级至 windows.5 或之后的版本。旧版管理接口注册路径末尾多了 `/`，不符合 Harness 的前缀匹配规则；这不表示仓库或分支设置错误。
 
-本地安装通过链接引用生成目录，**保留该目录及其依赖，不要在已链接目录中重新 build 或覆盖文件**。升级前停止当前仓库并备份状态目录，在新的 `bundle-v5`（以后使用新的版本号）目录生成包，再通过插件管理器安装。停用、卸载和升级都使用插件管理器。安装包、依赖和状态数据均不提交到 Git。
+本地安装通过链接引用生成目录，**保留该目录及其依赖，不要在已链接目录中重新 build 或覆盖文件**。升级前停止当前仓库并备份状态目录，在新的 `bundle-v6`（以后使用新的版本号）目录生成包，再通过插件管理器安装。停用、卸载和升级都使用插件管理器。安装包、依赖和状态数据均不提交到 Git。
 
 ## 仓库状态与旧版数据
 

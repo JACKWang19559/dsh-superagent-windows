@@ -1,5 +1,13 @@
 # Windows adaptation changelog
 
+## 0.1.0-windows.6 — 2026-11-04
+
+Adds a **Superagent** conversation View at order 11, immediately after Trajectory and before other later extensions, for every started workspace Session. The View shows its project's repository/branch, matching run state, saved ticket counts, recent tickets and retained launches, with related Session links and a new Superagent conversation action targeting that workspace. All initial and refresh requests are read-only; viewing a project never starts work.
+
+A supervisor-owned `/orchestrator/project?sessionId=...` endpoint resolves canonical Session workspace membership and local Git identity. Branch upstream takes precedence over origin; unresolved remote ambiguity and detached HEAD do not borrow another project's state. Repository names are compared case-insensitively, branches exactly, and unspecified/default targets require local default-branch evidence. Ticket reads validate schema and target without constructing or migrating a Store. An active target uses its Runtime's owned database reader; stopped data uses an isolated snapshot so SQLite shared-memory bookkeeping cannot modify the source. Saved execution stages are labelled as records rather than live workers. The Client aborts superseded requests and refuses a response for another Session.
+
+The sidebar retains global management controls. The new conversation action uses the public workspace navigation API without submitting a message, changing a draft or granting permissions. Upgrade into a fresh bundle directory, then fully quit/reopen Desktop `0.2.1-rc.5` to load the changed Client artifact.
+
 ## 0.1.0-windows.5 — 2026-11-03
 
 Fixes the management panel reporting “dsh-superagent is not responding” while the launcher correctly shows a running repository. The management prefix was registered with a trailing slash, but Harness matches prefix `p` against `p` and `p/<path>`. Requests such as `/orchestrator/api/state` therefore missed the route and received an empty 404. Registering `/orchestrator/api` restores the existing endpoints without changing client URLs or repository configuration.
