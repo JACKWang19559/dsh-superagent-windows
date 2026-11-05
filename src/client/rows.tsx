@@ -1,7 +1,7 @@
 /** Shared list rows for Tickets, Threads, and Decisions, plus Source fact chips and automated-message run folding. */
 import { useState } from 'react'
 import type { DecisionRow, ThreadFacts, ThreadRow, TicketRow } from './api.ts'
-import { Icon, Tag } from './controls.tsx'
+import { Button, Icon, Tag } from './controls.tsx'
 import { decisionMark, threadMark, ticketMark } from './marks.ts'
 import { usePanel } from './provider.tsx'
 import { actorName, localized, readableMarkers, reasonLabel, valueLabel } from './text.ts'
@@ -29,8 +29,10 @@ export function TicketLine({ ticket, question, onChanged, context }: {
       </div>
       {/* Always render the actions container so every Ticket row keeps a uniform three-line height. */}
       <div className="dt-ticket-actions">{onChanged && <>
-        {answer && <ActionLink href={answer.url} icon="message">{t('answerIn', { source: valueLabel(t, 'source',
+        {answer?.url && <ActionLink href={answer.url} icon="message">{t('answerIn', { source: valueLabel(t, 'source',
           answer.source) })}</ActionLink>}
+        {answer?.source === 'local' && <Button variant="outline" size="sm" icon={<Icon name="message" size={14} />}
+          onClick={() => navigate({ page: 'execution', id: ticket.id })}>{t('localSendFollowup')}</Button>}
         {ticket.actions.retry && <ConfirmButton variant="outline" icon="refresh" label={t('retry')} title={t('retryTitle')}
           message={t('retryConfirm', { title: ticket.title })}
           onConfirm={() => after(call('POST tickets/:id/retry', { id: ticket.id }))} />}

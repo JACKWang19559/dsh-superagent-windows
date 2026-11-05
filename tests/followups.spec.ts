@@ -3,6 +3,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { CHAT, feishu, startRuntime, type Host } from './fixtures/host.ts'
 import { repliedTo } from '../src/app/links.ts'
 import { inputMessage } from '../src/executor/dsh.ts'
+import { key, type Trigger } from '../src/core/index.ts'
+import { localKind } from '../src/sources/local.ts'
 
 let h: Host | undefined
 afterEach(async () => { await h?.stop(); h = undefined })
@@ -44,6 +46,7 @@ it('sends a person\'s message that reaches no ticket, such as only one a person 
   expect(h.candidates()).toEqual([message.id])
 })
 
+// This multi-ticket flow passes alone but can exceed 5 seconds when the full suite shares the CPU.
 it('leaves a delivered follow-up to its ticket\'s worker: the main Session may stop the ticket on it, and route it only once handed back',
   async () => {
   h = await startRuntime()
@@ -86,7 +89,7 @@ it('leaves a delivered follow-up to its ticket\'s worker: the main Session may s
   const stop = await settle('7', '先停一下')
   expect(await h!.route({ kind: 'stop', ticket_id: ticket.id, trigger_id: stop })).toMatchObject({ decision: 'stop' })
   expect(h.runtime.store.tickets.get(ticket.id)!.ended).toMatchObject({ by: 'human', outcome: 'stopped' })
-})
+}, 15_000)
 
 /**
  * Count main-session model turns triggered by steers: each steer while idle starts a new turn,
@@ -130,6 +133,104 @@ it('keeps a follow-up\'s notice in the effect queue until the main Session takes
   try { await h.runtime.pump(); await h.runtime.idle() } finally { vi.useRealTimers() }
   expect(notices(h).map(item => item.trigger_id)).toEqual([message.id])
   expect(h.runtime.effects.pending('relay')).toBe(false)
+})
+
+it.each([
+  { source: 'github', paused: false }, { source: 'github', paused: true },
+  { source: 'feishu', paused: false }, { source: 'feishu', paused: true },
+] as const)('relays the first local follow-up on a $source ticket once (paused: $paused), allowing a human stop', async ({ source, paused }) => {
+  h = await startRuntime()
+  h.runtime.sources.register(localKind)
+  const origin: Trigger = source === 'feishu' ? feishu('1', '@bot 修一下回归') : {
+    id: 'github-request', source: 'github', actor: { source: 'github', id: 'alice' }, human: true,
+    addressed: 'mention', threads: [{ source: 'github', id: '42' }], at: new Date().toISOString(), text: 'Fix the typo',
+    meta: { number: 42 }, channel: { source: 'github', thread: 'github:42', address: { number: '42' } },
+  }
+  const { ticket, sessionId } = await h.acceptedTicket(origin)
+  expect(h.tools.get(sessionId)!.has('orchestrator_route')).toBe(false)
+  h.deliveries.mockClear()
+  if (paused) await h.runtime.settings.pause(true, 'panel')
+  // The control message must survive a missing main Session; intake has no local subscription yet.
+  h.agents.get(h.runtime.masterId)!.steer.mockImplementationOnce(() => { throw new Error('session gone') })
+  const path = `tickets/${ticket.id}/messages`, request = { requestId: 'local-stop-001', text: '请停止这个任务' }
+  const first = await h.api('POST', path, request), triggerId = first.body.triggerId as string, thread = first.body.thread as string
+  expect(first).toMatchObject({ status: 200, body: { received: 'stored', ticketId: ticket.id } })
+  await h.runtime.idle()
+  // The Eval must finish before the notification is built, since it hides follow-up ownership while it holds the Trigger.
+  expect(h.runtime.engine.candidate(triggerId)).toBeUndefined()
+  expect(h.runtime.store.threads.get(thread)).toMatchObject({ subscriptions: [ticket.id], pending: [] })
+  expect(h.runtime.store.threads.get(thread)).not.toHaveProperty('evaluating')
+  expect(h.runtime.store.triggers.disposition(triggerId)?.fanout).toEqual([ticket.id])
+  expect(h.candidates()).toEqual([])
+  const queued = () => h!.runtime.store.db.prepare("SELECT key, attempts, due FROM effect WHERE kind = 'relay'").all()
+  const pending = queued()
+  expect(pending).toEqual([{ key: `followup:${triggerId}`, attempts: 1, due: expect.any(Number) }])
+  expect(notices(h)).toEqual([])
+  // Replaying the HTTP request neither adds an Input nor resets the reliable queue's backoff.
+  expect(await h.api('POST', path, request)).toMatchObject({ status: 200, body: { received: 'duplicate' } })
+  expect(queued()).toEqual(pending)
+  if (paused) await h.runtime.settings.pause(false, 'panel')
+  vi.useFakeTimers({ toFake: ['Date'], now: Date.now() + 2100 })
+  try { await h.runtime.pump(); await h.runtime.idle() } finally { vi.useRealTimers() }
+  expect(notices(h)).toEqual([expect.objectContaining({ trigger_id: triggerId, text: request.text, from: 'owner', thread,
+    delivered_to: [expect.objectContaining({ ticket_id: ticket.id })], note: expect.stringContaining('orchestrator_route kind stop') })])
+  expect(h.runtime.effects.pending('relay')).toBe(false)
+  expect(h.relays(sessionId).filter(item => item.trigger_id === triggerId)).toHaveLength(1)
+  expect(h.runtime.store.tickets.get(ticket.id)!.ended).toBeUndefined()
+  expect(h.runtime.store.tickets.get(ticket.id)!.mandate).toEqual(ticket.mandate)
+  // Subsequent subscribed messages and another replay each still produce only one notification and one Input per message.
+  expect(await h.api('POST', path, request)).toMatchObject({ status: 200, body: { received: 'duplicate' } })
+  const next = await h.api('POST', path, { requestId: 'local-stop-002', text: '也说明一下当前进度' })
+  expect(next.status).toBe(200)
+  await h.runtime.pump(); await h.runtime.idle()
+  expect(notices(h).map(item => item.trigger_id)).toEqual([triggerId, next.body.triggerId])
+  expect(h.runtime.store.tickets.get(ticket.id)!.inputs.filter(input => input.kind === 'trigger')).toHaveLength(2)
+  // The existing main-Session tool makes the Policy-checked stop decision; the text itself did not force a stop in HTTP.
+  expect(await h.route({ kind: 'stop', ticket_id: ticket.id, trigger_id: notices(h)[0]!.trigger_id }))
+    .toMatchObject({ decision: 'stop' })
+  expect(h.runtime.store.decisions.byThread(thread)).toContainEqual(expect.objectContaining({ kind: 'stop', ticketId: ticket.id,
+    triggerIds: [triggerId], strength: 'explicit' }))
+  expect(h.runtime.store.triggers.get(triggerId)).toMatchObject({ actor: { source: 'local', id: 'owner' }, human: true })
+  expect(h.runtime.store.tickets.get(ticket.id)!.ended).toMatchObject({ by: 'human', outcome: 'stopped' })
+})
+
+it('rolls back a first local follow-up and its durable notice if attachment fails, then accepts the same request once', async () => {
+  h = await startRuntime()
+  h.runtime.sources.register(localKind)
+  const { ticket } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
+  h.deliveries.mockClear()
+  const request = { requestId: 'local-rollback-001', text: '请停止这个任务' }, triggerId = key('local-request', request.requestId)
+  const path = `tickets/${ticket.id}/messages`, attach = h.runtime.engine.attach.bind(h.runtime.engine)
+  let queued = false
+  vi.spyOn(h.runtime.engine, 'attach').mockImplementationOnce((...args) => {
+    attach(...args)
+    queued = h!.runtime.effects.pending('relay', `followup:${triggerId}`)
+    throw new Error('submission aborted after attachment')
+  })
+  expect(await h.api('POST', path, request)).toMatchObject({ status: 500 })
+  expect(queued).toBe(true)
+  await h.runtime.idle()
+  expect(h.runtime.store.triggers.get(triggerId)).toBeUndefined()
+  expect(h.runtime.store.threads.get(`local:${key('local-ticket', ticket.id)}`)).toBeUndefined()
+  expect(h.runtime.store.tickets.get(ticket.id)).toEqual(ticket)
+  expect(h.runtime.effects.pending('relay', `followup:${triggerId}`)).toBe(false)
+  expect(notices(h)).toEqual([])
+  expect(await h.api('POST', path, request)).toMatchObject({ status: 200, body: { received: 'stored' } })
+  await h.runtime.idle()
+  expect(notices(h).map(item => item.trigger_id)).toEqual([triggerId])
+  expect(h.runtime.store.tickets.get(ticket.id)!.inputs.filter(input => input.kind === 'trigger')).toHaveLength(1)
+})
+
+it('does not treat a bot message attached outside the main Session as a human follow-up', async () => {
+  h = await startRuntime()
+  const { ticket } = await h.acceptedTicket(feishu('1', '@bot 修一下回归'))
+  const message = { ...feishu('40', 'CI completed', { root_id: undefined }), human: false }
+  h.runtime.receive(message); await h.runtime.idle()
+  h.deliveries.mockClear()
+  h.runtime.engine.attach(ticket.id, message.id)
+  await h.runtime.idle()
+  expect(h.runtime.store.triggers.disposition(message.id)?.fanout).toEqual([ticket.id])
+  expect(notices(h)).toEqual([])
 })
 
 it('relays a message a worker handed back as a candidate with the worker\'s reason', async () => {

@@ -146,6 +146,7 @@ export class Settings {
    * @throws UserError | z.ZodError when `block` is unknown, the source is not installed, `value` is invalid (such as an `executor` block carrying `paused`, which only `pause` sets), a non-panel `origin` changes panel-only fields, or a role-model or account check fails.
    */
   async save(block: SettingsBlock, value: unknown, revision: number, origin: SettingsOrigin) {
+    this.host.lifetime.throwIfAborted()
     const { store, sources, engine, sessions } = this.host
     const stale = () => revision !== store.blockRevision(block)
     if (stale()) throw new SettingsConflict('Settings changed. Reload before saving.')
@@ -165,12 +166,14 @@ export class Settings {
     }
     rules.guard?.(current, candidate, origin)
     if (setupChanged(current, candidate)) await this.host.setup.checkAccounts(block, candidate)
+    this.host.lifetime.throwIfAborted()
     if (stale()) throw new SettingsConflict('Settings changed during the checks. Reload before saving.')
     // Re-read current settings after async checks in case unrelated blocks were saved concurrently.
     const old = store.settings()
     const settings = rules.merge(old, parsed, id)
     if (JSON.stringify(SettingsSchema.parse(settings)) === JSON.stringify(old)) {
       const delivery = await sessions.delivery(`settings:${block}`)
+      this.host.lifetime.throwIfAborted()
       return { saved: true, revision: store.blockRevision(block), policy_changed: false, restarting: false, context_delivery: delivery }
     }
     const restarting = setupChanged(old, settings) || !this.host.setup.configured()
@@ -190,6 +193,7 @@ export class Settings {
     if (changed) await this.host.setup.blockCommands(blocked)
     // When restarting, the notice stays pending until after the restart; `setup.restart()` defers until this call returns.
     const delivery = restarting ? 'pending' : await sessions.delivery(`settings:${block}`)
+    this.host.lifetime.throwIfAborted()
     if (restarting) this.host.setup.restart()
     else this.host.requestPass()
     return { saved: true, revision: store.blockRevision(block), policy_changed: before !== after, restarting, context_delivery: delivery }
@@ -229,22 +233,26 @@ export class Settings {
    * @throws UserError (`nothingToSync`) when `id` cannot sync now, `SettingsConflict` if the `'policy'` block changed during synchronization, or the underlying sync error on failure.
    */
   async sync(id: string) {
+    this.host.lifetime.throwIfAborted()
     const { store, sources } = this.host
     if (!this.syncable().includes(id)) throw new UserError('nothingToSync', { source: id })
     const health = this.syncHealth(id)
     try {
       const revision = store.blockRevision('policy')
       const part = await sources.kind(id)!.policy!.sync!.run(this.host.sourceHost, sources.policyPart(id)!, this.host.lifetime)
+      this.host.lifetime.throwIfAborted()
       if (revision !== store.blockRevision('policy')) throw new SettingsConflict('Policy changed during synchronization. Retry with the current settings.')
       const policy = store.settings().policy
       // Skip saving a new revision when the synced list is unchanged.
       if (JSON.stringify(part) !== JSON.stringify(policy.sources[id])) {
         await this.save('policy', { ...policy, sources: { ...policy.sources, [id]: part } }, revision, 'sync')
       }
+      this.host.lifetime.throwIfAborted()
       health.set({ state: 'ready', detail: `${part.allowed.length} allowed`, at: now() })
       this.retrySync(id, false)
       return part
     } catch (error) {
+      this.host.lifetime.throwIfAborted()
       health.set({ state: 'error', detail: String(error), at: now() })
       this.retrySync(id, true)
       throw error

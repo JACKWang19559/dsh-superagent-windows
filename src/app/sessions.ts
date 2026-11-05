@@ -74,10 +74,11 @@ const SLEEP = /(?:^|[;&|({!`\n]|\b(?:do|then|else|elif|if|while|until|time|exec|
  * a command 60 seconds and a job wait lasts 30 seconds by default, so a command needs a timeout or the background, and a
  * job wait its timeout; the router preset ends both after 5 seconds.
  */
-function noWait({ name, arguments: input }: { name: string; arguments: unknown }, routed: () => boolean): string | undefined {
+export function noWait({ name, arguments: input }: { name: string; arguments: unknown }, routed: () => boolean): string | undefined {
   const args = (input ?? {}) as { command?: unknown; timeoutMs?: unknown; run_in_background?: unknown; wait?: unknown; timeout_ms?: unknown }
-  if (name === 'bash') {
-    const sleeps = typeof args.command === 'string' && SLEEP.test(args.command)
+  if (name === 'bash' || name === 'pwsh') {
+    const sleeps = typeof args.command === 'string' && (SLEEP.test(args.command)
+      || name === 'pwsh' && /(?:^|[;&|({\n])\s*(?:Microsoft\.PowerShell\.Utility\\)?(?:Start-Sleep|sleep)\b/i.test(args.command))
     if (sleeps || typeof args.timeoutMs === 'number' && args.timeoutMs > 30_000) return NO_WAIT
     if (args.timeoutMs === undefined && args.run_in_background !== true && !routed()) return DEFAULT_WAIT
   }
@@ -95,6 +96,7 @@ export class Sessions {
   /** Decorated agents mapped to their registered disposers and skill scope until the agent is disposed or `Sessions.dispose()` runs. */
   private readonly bindings = new Map<Agent, SessionBinding>()
   private readonly retryHealth = new RetryHealth()
+  private readonly disposers: (() => void)[] = []
   private readonly ctx: Context
   /** Registers ordered `relay` and `notice` effect handlers that deliver to the main Session. */
   constructor(private readonly host: SessionsHost) {
@@ -107,21 +109,22 @@ export class Sessions {
   /** Subscribes to host agent and session events so newly created sessions are decorated and model-budget retries are reflected in health. Call once at startup. */
   install(): void {
     const ctx = this.ctx
-    ctx.on('agent/disposed', ({ agent }) => {
+    this.host.lifetime.throwIfAborted()
+    this.disposers.push(ctx.on('agent/disposed', ({ agent }) => {
       this.release(agent)
       this.retryHealth.clear(agent.id); this.updateModelHealth()
-    })
-    ctx.on('session/event', (session, event) => {
+    }))
+    this.disposers.push(ctx.on('session/event', (session, event) => {
       const agent = ctx.agents.get(session.id)
       const binding = agent && agent.session === session ? this.bindings.get(agent) : undefined
       if (!agent || !binding || binding.subagent) return
       this.retryHealth.observe(agent.id, event)
       this.updateModelHealth()
-    })
-    ctx.on('agent/created', async ({ agent }) => { await this.decorate(agent); return undefined })
+    }))
+    this.disposers.push(ctx.on('agent/created', async ({ agent }) => { await this.decorate(agent); return undefined }))
     // Opening a Session in DSH's Web UI before its first turn may select the default preset for it: select ours again. After
     // its first turn DSH refuses any selection, which leaves it as it is.
-    ctx.inject(['agentPresets'], child => {
+    const presetsScope = ctx.inject(['agentPresets'], child => {
       child.on('agent-preset/selected', (sessionId, preset) => {
         const ticketId = ticketOfSession(sessionId), agent = ctx.agents.get(sessionId as SessionId)
         const ours = sessionId === this.host.masterId ? ROUTER_PRESET : ticketId && this.host.store.tickets.get(ticketId) ? WORKER_PRESET : undefined
@@ -130,26 +133,35 @@ export class Sessions {
         presets.select(agent, ours).catch(() => {})
       })
     })
-    ctx.on('agent/status', ({ agent, status }) => {
+    this.disposers.push(() => { presetsScope.dispose().catch((error: unknown) => { ctx.logger.warn('dsh-superagent could not release its preset listener: %s', String(error)) }) })
+    this.disposers.push(ctx.on('agent/status', ({ agent, status }) => {
       if (status === 'idle' && !this.host.closing()) { this.retryHealth.clear(agent.id); this.updateModelHealth() }
-    })
+    }))
   }
-  /** Resolves or creates session `id` in workspace `cwd`, initializes its role model, decorates it with prompts/skills/tools, sets `danger-full-access` permissions, and renames it to `title`. */
+  /** Resolves or creates session `id`, decorates its role and tools, preserves the operator's permissions, and renames it. */
   async ensure(id: string, cwd: string, title: string, role: 'orchestrator' | 'worker'): Promise<Agent> {
     const ctx = this.ctx
+    const signal = this.host.lifetime
+    signal.throwIfAborted()
     let result = await ctx.sessionController.resolveAgent(id as SessionId)
+    signal.throwIfAborted()
     if ('error' in result && result.error.code === 'session/not-found') {
       const workspace = await ctx.workspaceRegistry.create(cwd)
+      signal.throwIfAborted()
       // A Session keeps the preset it was created with, one of the bundle's own (cordis.patch.yml).
       await ctx.sessionController.create({ sessionId: id as SessionId, workspaceId: workspace.id,
         agentPreset: role === 'worker' ? WORKER_PRESET : ROUTER_PRESET })
+      signal.throwIfAborted()
       result = await ctx.sessionController.resolveAgent(id as SessionId)
+      signal.throwIfAborted()
     }
     if ('error' in result) throw result.error
     const settings = this.host.store.settings()
-    await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model)
+    await initializeRoleModel(ctx, result.agent, role === 'orchestrator' ? settings.eval.model : settings.executor.model, signal)
+    signal.throwIfAborted()
     await this.decorate(result.agent)
-    ctx.permissionPresets.set(result.agent.session, 'danger-full-access')
+    signal.throwIfAborted()
+    // The desktop's persisted/default permission preset belongs to the operator; resuming a task must not elevate it.
     await ctx.sessionController.rename({ sessionId: id as SessionId, title })
     return result.agent
   }
@@ -230,7 +242,7 @@ export class Sessions {
     return ticketId === undefined ? undefined : this.host.store.tickets.get(ticketId)
   }
   private async decorate(agent: Agent): Promise<void> {
-    if (this.bindings.has(agent)) return
+    if (this.host.lifetime.aborted || this.host.closing() || this.bindings.has(agent)) return
     const host = this.host
     const master = agent.id === host.masterId
     const ticket = master ? undefined : this.ticketOf(agent)
@@ -260,7 +272,9 @@ export class Sessions {
     const register = this.registerTool(agent, binding)
     for (const tool of host.tools(agent, ticket)) register(tool.name, tool.description, tool.schema, tool.execute)
     if (master) {
-      binding.disposers.push(agent.ctx.tools.restrict({ allow: ['skill', 'bash', 'read', 'read_image', 'job_output', 'job_list', 'job_kill'] }),
+      const parent = scopeParentOf(agent)
+      const allow = ['skill', 'bash', 'pwsh', 'read', 'read_image', 'job_output', 'job_list', 'job_kill'].filter(name => agent.ctx.tools.get(name, parent))
+      binding.disposers.push(agent.ctx.tools.restrict({ allow }),
         agent.ctx.tools.guard(execution => noWait(execution, () => this.routed(agent))))
     } else {
       // An Executor Session keeps the profile's work tools it has, which DSH requires to be known; its own tools are not masked.
@@ -348,5 +362,8 @@ export class Sessions {
     }
   }
   /** Releases prompt sections, skills, and tools registered by `Sessions` across all decorated agents. */
-  dispose(): void { for (const agent of [...this.bindings.keys()]) this.release(agent) }
+  dispose(): void {
+    for (const dispose of this.disposers.splice(0).reverse()) dispose()
+    for (const agent of [...this.bindings.keys()]) this.release(agent)
+  }
 }

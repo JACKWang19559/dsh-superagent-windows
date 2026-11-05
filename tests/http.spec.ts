@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest'
 import { z } from 'zod'
-import { registerHttp } from '../src/app/http.ts'
+import { registerHttp, sameOrigin } from '../src/app/http.ts'
 import { PromptConflict } from '../src/app/prompts.ts'
 import { SettingsConflict } from '../src/app/settings.ts'
 import type { HttpHost } from '../src/app/http.ts'
@@ -78,6 +78,15 @@ it('answers only a same-origin request from the panel on the loopback address', 
   expect(await post({ host: 'localhost:3082', origin: 'http://localhost:3082' })).toMatchObject({ status: 200 })
   // Management routes require a loopback Web server.
   expect(() => serve({}, '0.0.0.0')).toThrow('Orchestrator management requires a loopback Web server')
+})
+
+it('accepts the desktop proxy shape at a random loopback port while rejecting its raw application Origin', () => {
+  const headers = { host: '127.0.0.1:49183', 'x-orchestrator-request': '1' }
+  // The authenticated desktop proxy removes Origin and rewrites Host before forwarding to the local Web server.
+  expect(sameOrigin({ headers }, 49183)).toBe(true)
+  expect(sameOrigin({ headers: { ...headers, origin: 'dsh-app://app' } }, 49183)).toBe(false)
+  expect(sameOrigin({ headers: { ...headers, origin: 'null' } }, 49183)).toBe(false)
+  expect(sameOrigin({ headers }, 49184)).toBe(false)
 })
 
 it('answers a prompt save that lost a race with 409, and a settings body over 128 KiB with 400', async () => {

@@ -19,6 +19,8 @@ import { feishuChannel } from '../../src/sources/feishu-trigger.ts'
 import { githubChannel } from '../../src/sources/github-trigger.ts'
 import { feishuKind } from '../../src/sources/feishu.ts'
 import { githubKind } from '../../src/sources/github.ts'
+import { LocalTaskRequestSchema } from '../../src/sources/local.ts'
+import { key } from '../../src/core/index.ts'
 import type { Health } from '../../src/sources/host.ts'
 import type { SourceKind } from '../../src/sources/kind.ts'
 import { testDeployment } from './deployment.ts'
@@ -100,6 +102,7 @@ export interface PanelServer {
   searching?: (query: string) => Promise<void>
   setup: SetupView
   health: Record<string, Health>
+  localTasks: StateView['localTasks']
   /** When true, all API requests return an empty 404 to simulate the host plugin being stopped. */
   down: boolean
   /** Count of responses not yet consumed by the client. */
@@ -161,7 +164,7 @@ const stateView = (): StateView => ({
   setup: server.setup, load: { running: server.setup.problem ? 0 : 2, queued: 0, maxWorkers: server.settings.executor.maxWorkers },
   masterId: 'master', paused: server.settings.paused,
   // The panel does not read health; the service script does.
-  health: {},
+  health: {}, localTasks: server.localTasks,
 })
 const settingsView = (): ApiResponse<'GET settings'> => ({
   policyVersion: 'abcdef1234567890',
@@ -205,7 +208,7 @@ export const acceptDecision = (): NonNullable<TicketPageView['decision']> => ({ 
   reason: [{ code: 'explicitRouted' }], at: '2026-09-22T00:00:00Z', strength: 'explicit', ticketId: undefined,
   triggerIds: ['e1'], thread: 'feishu:oc_1:om_root', rules: [], preview: '@bot 修一下', ticketTitle: undefined })
 const ticketDetail = (): TicketPageView => ({
-  ...ticketSummary(), paused: false, decision: acceptDecision(), threads: [threadSummary()],
+  ...ticketSummary(), paused: false, decision: acceptDecision(), threads: [threadSummary()], local: undefined,
   mandate: { strength: 'explicit', policyVersion: 'abcdef1234567890', basis: { via: 'addressed', sender: 'Alice', addressed: 'mention' },
     actor: actor('feishu', MEMBER), scope: '修复登录页回归' },
   basis: { facts: [{ name: 'sender', value: 'Alice' }, { name: 'addressed', value: 'mention' }], legacy: false },
@@ -248,6 +251,7 @@ function initial(): PanelServer {
   const defaults = { revision: 0, previousRevision: null, savedAt: '', source: 'defaults' }
   return {
     health: {}, down: false, pending: 0, opened: [], requests: [], misuse: [], queued: new Set(), dropped: [], failing: [],
+    localTasks: { allowed: false, reason: 'sourceOff' },
     setup: { machine: MACHINE, problem: null, feishuProblem: null,
       accounts: { repository: 'acme/widgets', agent: 'agent-bot', feishu: { appId: 'cli_bot', brand: 'feishu', botId: 'ou_bot',
         name: 'Widgets Bot' } } },
@@ -327,6 +331,23 @@ const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET tickets': { query: ['state', 'offset', 'limit'], answer: ({ query }) => page(server.tickets[query.state === 'ended' ? 'ended'
     : 'open']) },
   'GET tickets/:id': { answer: ({ params }) => server.ticketDetails[params.id] ?? refuse(404, 'Ticket not found') },
+  'POST local/tasks': { body: true, answer: ({ body }) => {
+    const request = LocalTaskRequestSchema.parse(body), id = key('local-request', request.requestId)
+    const thread = `local:${key('local-task', request.requestId)}`, previous = server.threadPages
+    const page: ThreadPageView = { ...threadSummary({ key: thread, source: 'local', title: request.text, subscriptions: 0, tickets: [],
+      facts: {} }), tickets: [], correlated: [], context: [], decisions: [], earlier: null,
+      timeline: [trigger(id, new Date().toISOString(), { source: 'local', actor: actor('local', 'owner'), text: request.text,
+        preview: request.text, threads: [thread] })], local: { thread, allowed: true, messages: [], replies: [] } }
+    server.threadPages = (target, query) => target === thread ? page : previous(target, query)
+    return { requestId: request.requestId, triggerId: id, thread, received: 'stored' }
+  } },
+  'POST tickets/:id/messages': { body: true, answer: ({ params, body }) => {
+    const request = LocalTaskRequestSchema.parse(body), conversation = server.ticketDetails[params.id]?.local
+    if (!conversation) return refuse(404, 'Ticket not found')
+    const id = key('local-request', request.requestId)
+    conversation.messages.push({ id, text: request.text, at: new Date().toISOString() })
+    return { requestId: request.requestId, triggerId: id, thread: conversation.thread, received: 'stored', ticketId: params.id }
+  } },
   'POST tickets/:id/retry': { answer: ({ params }) => {
     const ticket = ticketOf(params.id)
     if (!ticket) return refuse(404, 'Ticket not found')

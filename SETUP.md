@@ -2,6 +2,8 @@
 
 Instructions for an agent that sets up dsh-superagent with its operator. If you are a person, ask your coding agent to read this file and follow it.
 
+**Native Windows Desktop:** use [009 Windows Desktop](docs/009-windows-desktop.md) instead of the POSIX probe, tmux service and profile-creation steps below. Manage the existing desktop profile only with the installed Desktop's own CLI; never replace it with a Web profile.
+
 ## How to run the setup
 
 The setup follows [docs/000-philosophy.md](docs/000-philosophy.md): it takes as little of the operator's attention as possible.

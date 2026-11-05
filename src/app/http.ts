@@ -3,7 +3,8 @@ import type { Context } from '@deepseek-ai/cordis'
 import type {} from '@deepseek-ai/dsh-host-webserver'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { z } from 'zod'
-import { THREAD_FILTERS, TICKET_FILTERS, type Api, type ApiResponse, type RouteParams } from './api.ts'
+import { LOCAL_TASK_TEXT_LIMIT, THREAD_FILTERS, TICKET_FILTERS, type Api, type ApiResponse, type RouteParams } from './api.ts'
+import { LocalTaskError, type LocalTasks } from '../sources/local.ts'
 import { sourceSkills } from './context.ts'
 import type { ModelCatalog } from '@deepseek-ai/dsh-api-session-controller/types'
 import { PromptConflict, SKILL_NAME, SKILL_PREFIX, TEAM_SECTIONS, builtInBase, builtInParts, defaultPrompts, savePrompts, type Prompts }
@@ -37,6 +38,7 @@ export interface HttpHost {
   readonly sessions: Pick<Sessions, 'status' | 'notify' | 'delivery'>
   readonly settings: Pick<Settings, 'view' | 'save' | 'pause' | 'sync' | 'refreshLabels'>
   readonly engine: EngineForPeople
+  readonly localTasks: Pick<LocalTasks, 'create' | 'followup' | 'conversation' | 'threadConversation' | 'available'>
   readonly executor: Pick<DshExecutor, 'activeCount'>
   readonly health: Record<string, Health>
   readonly machine: Machine
@@ -84,7 +86,7 @@ function failure(error: unknown): [number, Record<string, unknown>] {
     return [400, { error: `Invalid settings: ${issues.map(issue => issue.path).join(', ')}`, issues }]
   }
   if (error instanceof SetupError) return [400, { error: error.message, setup: error.problem }]
-  if (error instanceof RouteError) return [error.status, { error: error.message }]
+  if (error instanceof RouteError || error instanceof LocalTaskError) return [error.status, { error: error.message }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
   if (error instanceof SettingsConflict || error instanceof PromptConflict) return [409, { error: error.message }]
   return [500, { error: error instanceof Error ? error.message : String(error) }]
@@ -104,9 +106,11 @@ function setupView(runtime: HttpHost) {
 /** Build the `/orchestrator/api/state` response consumed by the management panel and `scripts/dsh-superagent status` (`docs/006-deployment.md`). */
 export function stateView(runtime: HttpHost) {
   const settings = runtime.store.settings()
+  const localRefusal = runtime.localTasks ? runtime.localTasks.available() : 'sourceOff'
   return { setup: setupView(runtime), load: { ...executorLoad(runtime.store, runtime.executor.activeCount()),
     maxWorkers: settings.executor.maxWorkers },
-    masterId: runtime.masterId, paused: settings.paused, health: runtime.health }
+    masterId: runtime.masterId, paused: settings.paused, health: runtime.health,
+    localTasks: { allowed: !localRefusal, reason: localRefusal ?? null } }
 }
 const views = (runtime: HttpHost): ViewHost => ({ store: runtime.store, sources: runtime.sources, links: runtime.links() })
 const setupState = (runtime: HttpHost): SetupState => ({ deployment: runtime.configured() ? runtime.deployment : undefined,
@@ -116,7 +120,8 @@ export type StateView = ReturnType<typeof stateView>
 function ticketPage(runtime: HttpHost, id: string) {
   const detail = ticketDetail(views(runtime), id), ticket = runtime.store.tickets.get(id)
   if (!detail || !ticket) throw new RouteError(404, 'Ticket not found')
-  return { ...detail, environment: runtime.configured() ? runtime.ticketEnvironment(ticket) : [] }
+  const local = runtime.localTasks?.conversation(id)
+  return { ...detail, environment: runtime.configured() ? runtime.ticketEnvironment(ticket) : [], ...local ? { local } : {} }
 }
 export type TicketPageView = ReturnType<typeof ticketPage>
 function promptsView(runtime: HttpHost, revision: number | undefined, offset: number) {
@@ -168,7 +173,8 @@ function routes(runtime: HttpHost): Routes {
       const { limit, before, around } = ThreadQuery.parse(query)
       const detail = threadDetail(views(runtime), params.key, before, limit, around)
       if (!detail) throw new RouteError(404, 'Thread not found')
-      return detail
+      const local = runtime.localTasks?.threadConversation(params.key)
+      return { ...detail, ...local ? { local } : {} }
     },
     'POST threads/:key/unsubscribe': async ({ params }) => {
       const removed = runtime.engine.unsubscribe(params.key)
@@ -190,6 +196,9 @@ function routes(runtime: HttpHost): Routes {
       return ticketList(views(runtime), state, offset, limit)
     },
     'GET tickets/:id': ({ params }) => ticketPage(runtime, params.id),
+    'POST local/tasks': async ({ body }) => runtime.localTasks.create(await body(4 * LOCAL_TASK_TEXT_LIMIT + 4096)),
+    'POST tickets/:id/messages': async ({ params, body }) => runtime.localTasks.followup(params.id,
+      await body(4 * LOCAL_TASK_TEXT_LIMIT + 4096)),
     'POST tickets/:id/retry': ({ params }) => { const id = ticket(params.id); runtime.engine.retryTicket(id); return { retried: true } },
     'POST tickets/:id/stop': ({ params }) => { const id = ticket(params.id); runtime.engine.stopTicket(id); return { stopped: true } },
     'POST executor/pause': async ({ body }) => runtime.settings.pause(z.object({ paused: z.boolean() }).parse(await body()).paused, 'panel'),

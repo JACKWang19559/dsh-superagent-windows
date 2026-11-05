@@ -1,11 +1,13 @@
 import { execFile } from 'node:child_process'
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { delimiter, join } from 'node:path'
 import { promisify } from 'node:util'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Config, executable, machineOf, resolveDeployment, resolveFeishuBot, type Machine, type Probe } from '../src/deployment.ts'
 import { gitEnv } from './fixtures/git.ts'
+import { WINDOWS } from '../src/infra/platform.ts'
+import { ExecutorConfigSchema } from '../src/policy.ts'
 
 const exec = promisify(execFile)
 let dir: string
@@ -19,13 +21,14 @@ const lark = (status: object, mode = 'bot', bot: object = { bot: { open_id: 'ou_
 const minimal = (overrides: Record<string, unknown> = {}) => ({ stateDir: join(dir, 'state'), ...overrides })
 const machine = (overrides: Partial<Machine> = {}): Machine => ({ ...machineOf(Config(minimal())), ...overrides })
 /** Runs commands like worker shells do, but locally: the stand-ins first on PATH, then the system's git. */
-const probe: Probe = async argv => (await exec(argv[0]!, argv.slice(1), { env: { PATH: path, HOME: dir } })).stdout
+const probe: Probe = async (argv, env) => (await exec(argv[0]!, argv.slice(1), { env: { PATH: path, HOME: dir, ...env } })).stdout
 const setupError = (place: string, code: string, values: Record<string, unknown> = {}) => expect.objectContaining({ place, code, values: expect.objectContaining(values) })
 
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'deployment-'))
   mkdirSync(join(dir, 'bin')); mkdirSync(join(dir, 'state', 'worker-bin'), { recursive: true }); mkdirSync(join(dir, 'widgets', 'src'), { recursive: true })
-  path = [join(dir, 'state-link', 'worker-bin'), `${join(dir, 'state', 'worker-bin')}/`, join(dir, 'bin'), '/usr/bin', '/bin'].join(':')
+  path = [join(dir, 'state-link', 'worker-bin'), `${join(dir, 'state', 'worker-bin')}/`, join(dir, 'bin'), '/usr/bin', '/bin'].join(delimiter)
+  if (WINDOWS) return // The shell fixtures below are POSIX integration tests; native Windows integration lives in native-windows.spec.ts.
   gh(join(dir, 'bin', 'gh'), 'Agent-Bot')
   program(join(dir, 'bin', 'lark-cli'), lark({ appId: 'cli_bot', brand: 'lark', identities: { bot: { status: 'ready' } } }))
   // Stale worker shims with the same binary name must be skipped regardless of PATH normalization or symlinks.
@@ -49,6 +52,19 @@ describe('configuration schema', () => {
       .toEqual({ stateDir: join(dir, 'state'), promptMaxChars: 100000, admissionContextMaxPages: 10, admissionContextTimeoutMs: 15000 })
     expect(() => Config(minimal({ stateDir: 'relative/dir' }))).toThrow()
     expect(() => Config(minimal({ stateDir: '~/dir' }))).toThrow()
+    expect(ExecutorConfigSchema.parse({ directory: join(dir, '中文 空格') }).directory).toBe(join(dir, '中文 空格'))
+    expect(ExecutorConfigSchema.parse({ directory: '' }).directory).toBe('')
+    for (const relative of ['C:relative', '\\relative', 'relative/dir']) {
+      expect(() => Config(minimal({ stateDir: relative }))).toThrow()
+      expect(ExecutorConfigSchema.safeParse({ directory: relative }).success).toBe(false)
+    }
+  })
+  it.skipIf(!WINDOWS)('accepts complete drive and UNC paths and rejects drive-relative roots on Windows', () => {
+    for (const stateDir of ['C:\\中文 空格\\state', 'C:/中文 空格/state', '\\\\server\\share\\state']) {
+      expect(machineOf(Config({ stateDir })).stateDir).toBe(stateDir)
+      expect(ExecutorConfigSchema.safeParse({ directory: stateDir }).success).toBe(true)
+    }
+    for (const stateDir of ['\\state', '/state', 'C:state', '\\\\server']) expect(() => Config({ stateDir })).toThrow()
   })
   it('names keys the configuration does not define, and where the values of older keys live now', () => {
     const raw = minimal({ repository: 'acme/widgets', repositoryPath: '/srv/widgets', blockedCommands: [], author: { name: 'Alice' }, extra: 1 })
@@ -56,7 +72,23 @@ describe('configuration schema', () => {
   })
 })
 
-describe('setup', () => {
+it('passes Feishu notifier settings as explicit environment overrides', async () => {
+  const calls: { argv: string[]; env?: Record<string, string | undefined> }[] = []
+  const jsonProbe: Probe = async (argv, env) => {
+    calls.push({ argv, env })
+    if (argv[1] === 'auth') return JSON.stringify({ appId: 'cli_bot', brand: 'lark', identities: { bot: { status: 'ready' } } })
+    if (argv[1] === 'config') return 'strict-mode: bot (source: profile)'
+    return JSON.stringify({ bot: { open_id: 'ou_bot', app_name: 'Widgets Bot' } })
+  }
+  expect(await resolveFeishuBot(machine(), { cli: process.execPath }, jsonProbe)).toMatchObject({ appId: 'cli_bot', botId: 'ou_bot', name: 'Widgets Bot' })
+  expect(calls.map(call => call.argv)).toEqual([
+    [process.execPath, 'auth', 'status'], [process.execPath, 'config', 'strict-mode'],
+    [process.execPath, 'api', 'GET', '/open-apis/bot/v3/info', '--as', 'bot', '--format', 'ndjson'],
+  ])
+  for (const call of calls) expect(call.env).toEqual({ LARKSUITE_CLI_NO_UPDATE_NOTIFIER: '1', LARKSUITE_CLI_NO_SKILLS_NOTIFIER: '1' })
+})
+
+describe.skipIf(WINDOWS)('POSIX CLI setup', () => {
   it('reads the repository from the GitHub Source and the accounts from their CLIs, skipping the worker shims', async () => {
     const deployment = await resolveDeployment(machine(), { repository: 'acme/widgets', cli: 'gh' }, probe, path)
     expect(deployment).toMatchObject({ repository: 'acme/widgets', github: { cli: join(dir, 'bin', 'gh'), login: 'Agent-Bot', noreply: '7+Agent-Bot@users.noreply.github.com' } })

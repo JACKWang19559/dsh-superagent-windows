@@ -5,6 +5,7 @@ import { agentEvents, installModelSelection, type Agent, type ModelSelection, ty
 import { Session, SessionId } from '@deepseek-ai/dsh-session'
 import { ReasoningEffortId } from '@deepseek-ai/dsh-llm'
 import { initializeRoleModel } from '../src/app/role-models.ts'
+import { deferred } from './fixtures/async.ts'
 const contexts: Context[] = []
 afterEach(async () => { await Promise.all(contexts.splice(0).map(ctx => ctx.fiber.dispose())); vi.restoreAllMocks() })
 async function fixture() {
@@ -53,6 +54,29 @@ it.each(['header', 'selection'])('preserves a resumed Session with existing %s',
   else agent.session.append('model/selection', existing)
   await initializeRoleModel(ctx, agent, { provider: 'worker', model: 'new' })
   expect(resolve).not.toHaveBeenCalled()
+})
+it('ignores an old model resolution after cancellation without changing a reloaded Session', async () => {
+  const { ctx, agent, resolve, flush } = await fixture()
+  const pending = deferred<ModelSelection>(), controller = new AbortController()
+  resolve.mockReturnValueOnce(pending.promise)
+  const old = initializeRoleModel(ctx, agent, { provider: 'old', model: 'stale' }, controller.signal).catch((error: unknown) => error)
+  expect(resolve).toHaveBeenCalledTimes(1)
+  controller.abort()
+  await initializeRoleModel(ctx, agent, { provider: 'current', model: 'keep' }, new AbortController().signal)
+  const events = agent.session.snapshotEvents()
+  pending.resolve({ provider: 'old', model: 'stale' })
+  expect(await old).toMatchObject({ name: 'AbortError' })
+  expect(agent.session.snapshotEvents()).toEqual(events)
+  expect(flush).toHaveBeenCalledTimes(1)
+  expect((await ctx.systemPrompt.assemble()).variables).toMatchObject({ provider: 'current', model: 'keep' })
+})
+it('does not resolve or persist a role model for an already cancelled runtime', async () => {
+  const { ctx, agent, resolve, flush } = await fixture()
+  const controller = new AbortController(); controller.abort()
+  await expect(initializeRoleModel(ctx, agent, { provider: 'old', model: 'stale' }, controller.signal)).rejects.toMatchObject({ name: 'AbortError' })
+  expect(resolve).not.toHaveBeenCalled()
+  expect(flush).not.toHaveBeenCalled()
+  expect(agent.session.snapshotEvents().some(event => event.type === 'model/selection')).toBe(false)
 })
 it('inherits the host when unset and fails unavailable routes before recording a selection', async () => {
   const { ctx, agent, resolve, request } = await fixture()

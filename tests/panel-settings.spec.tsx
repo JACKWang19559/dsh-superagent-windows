@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 // The Settings groups, drafts, save bars and history.
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Fields } from '../src/client/settings-kit.tsx'
@@ -37,7 +39,8 @@ it('saves the Eval block on the Policy settings and the Executor with its execut
   await type(field<HTMLInputElement>(zh.maxWorkers), '5')
   // An empty root uses the default directory, which the field names instead of looking set.
   expect(field<HTMLInputElement>(zh.executionDirectory).closest('.dt-field')!.querySelector('small')?.textContent).toBe('留空时用 /srv/dsh-superagent/work')
-  await type(field<HTMLInputElement>(zh.executionDirectory), '/srv/work')
+  const directory = join(tmpdir(), 'dsh-superagent-work')
+  await type(field<HTMLInputElement>(zh.executionDirectory), directory)
   // A variable picked from the list goes where the caret is in the prepare command.
   const prepare = field<HTMLTextAreaElement>(zh.prepareCommand)
   await type(prepare, 'git worktree add ')
@@ -53,7 +56,7 @@ it('saves the Eval block on the Policy settings and the Executor with its execut
     'worker-model'); await type(effort as HTMLInputElement, 'high')
   expect([...document.querySelectorAll('#dt-worker-model-efforts option')].map(option => option.getAttribute('value'))).toEqual(['high'])
   await click(zh.save)
-  expect(server.settings.executor).toEqual({ maxWorkers: 5, directory: '/srv/work',
+  expect(server.settings.executor).toEqual({ maxWorkers: 5, directory,
     prepare: 'git worktree add "$DSH_SUPERAGENT_DIR"', blockedCommands: ['gh-personal', 'gh.other'], model: { provider: 'worker-provider',
       model: 'worker-model', reasoningEffort: 'high' } })
   expect(server.requests.filter(request => request.method === 'PUT').map(request => request.path)).toEqual(['settings/eval',

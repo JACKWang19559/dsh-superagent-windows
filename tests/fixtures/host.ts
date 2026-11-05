@@ -131,6 +131,11 @@ export function subagentRuntime(agents: Map<string, FakeAgent>) {
   return { service, settle, spawn, live: (id: string) => !!children.get(id)?.live }
 }
 
+/** The host's prepare shell, after any environment prefix has been removed. */
+export const isPrepareCommand = (argv: readonly string[]): boolean =>
+  argv[0] === 'sh' && argv[1] === '-c'
+  || /(?:^|[\\/])(?:powershell|pwsh)(?:\.exe)?$/i.test(argv[0] ?? '') && argv.includes('-EncodedCommand')
+
 /** @param seed - writes to the database before the Runtime opens it, such as records an earlier version stored. */
 export async function startRuntime(seed?: (store: Store) => void) {
   const directory = mkdtempSync(join(tmpdir(), 'orchestrator-host-'))
@@ -150,14 +155,14 @@ export async function startRuntime(seed?: (store: Store) => void) {
     ['git config -z --show-origin --get-all credential.https://github.com.helper']: `file:${workerGitConfig(directory)}\0${credentialHelper(AGENT)}\0`,
     [scoped]: `global\0credential.helper\n\0global\0credential.https://github.com.helper\n${credentialHelper(AGENT)}\0`,
   }
-  /** A prepare command (`sh -c`) waits for this while it is set. */
+  /** A prepare command in the host's shell waits for this while it is set. */
   const hooks: { prepare?: Promise<void> } = {}
   const subprocess = { spawn: vi.fn((spec: { argv: readonly string[] }) => {
     const argv = [...spec.argv]
     while (argv[0] === 'env' || /^[A-Z_]+=/.test(argv[0] ?? '')) argv.shift()
     const reader = (text: string) => ({ readFrom: () => ({ text, nextOffset: text.length, lossy: false }) })
     const exited = { exitCode: 0, signal: null }
-    const done = argv[0] === 'sh' && hooks.prepare ? hooks.prepare.then(() => exited) : Promise.resolve(exited)
+    const done = isPrepareCommand(argv) && hooks.prepare ? hooks.prepare.then(() => exited) : Promise.resolve(exited)
     return { done, collected: { stdout: reader(answers[argv.join(' ')] ?? ''), stderr: reader('') } }
   }) }
   const agents = new Map<string, FakeAgent>()

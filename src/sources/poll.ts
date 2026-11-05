@@ -2,6 +2,23 @@
 import { liveTicket, type Thread } from '../core/index.ts'
 import type { SourceContext } from './host.ts'
 
+/** Waits for startup or cancellation, consuming even a ready rejection arriving after this Source was unloaded. */
+export function sourceReady(ctx: Pick<SourceContext, 'ready'>, signal: AbortSignal): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const stop = () => { signal.removeEventListener('abort', stop); resolve(false) }
+    signal.addEventListener('abort', stop, { once: true })
+    ctx.ready.then(() => {
+      signal.removeEventListener('abort', stop)
+      resolve(!signal.aborted)
+    }, (error: unknown) => {
+      signal.removeEventListener('abort', stop)
+      if (signal.aborted) resolve(false)
+      else reject(error)
+    })
+    if (signal.aborted) stop()
+  })
+}
+
 /** How long a subscribed Thread with no live Ticket continues to be polled after its last Trigger or Ticket end. */
 export const POLL_HORIZON_MS = 14 * 24 * 3600_000
 /** True when a subscribed thread has a live ticket or recent activity/completion within `POLL_HORIZON_MS`. */

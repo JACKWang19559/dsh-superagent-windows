@@ -3,6 +3,7 @@ import { useState, type ReactNode } from 'react'
 import { ApiError, usePoll, type TicketPageView } from './api.ts'
 import { DisclosureRow, Dot, Icon, Tag, type IconName } from './controls.tsx'
 import { decisionMark, reportDot, ticketMark } from './marks.ts'
+import { TaskConversation } from './local-task.tsx'
 import { usePanel } from './provider.tsx'
 import { settingsRoute } from './route.ts'
 import { Earlier, ThreadLine, automatedRuns } from './rows.tsx'
@@ -143,7 +144,7 @@ export function TicketPage({ id }: { id: string }) {
     {ended && <Hint>{ended}</Hint>}
     {data.attention && <div className="dt-banner"><span className="dt-banner-label">{t('attentionPrefix')}</span><MarkdownLite
       text={data.attention.question} />
-      {channel && <div className="dt-banner-actions">
+      {channel?.url && <div className="dt-banner-actions">
         <ActionLink href={channel.url} icon="message">{t('answerIn', { source: valueLabel(t, 'source', channel.source) })}</ActionLink>
       </div>}</div>}
     {/* Ordinary progress stays in the Session/Channels; only a report that halted work (blocked/failed) is shown here. */}
@@ -153,6 +154,7 @@ export function TicketPage({ id }: { id: string }) {
     {data.deliveryError && <p className="dt-banner dt-danger dt-mono">
       <span className="dt-banner-label">{t('deliveryFailedPrefix')}</span>{data.deliveryError}
     </p>}
+    {data.local && <TaskConversation ticketId={data.id} conversation={data.local} reload={reload} />}
     <MandateDetails ticket={data} actor={actor} />
     {undelivered.length > 0 && <Section title={t('undeliveredInputs')} count={undelivered.length}>
       <Hint>{data.deliveryError ? t('inputRetryHint') : data.paused ? t('inputPausedHint') : t('inputWaitingHint')}</Hint>
@@ -175,7 +177,8 @@ export function TicketPage({ id }: { id: string }) {
       </Details>}
       <Details icon="message" title={t('term.channel')}>
         <ul className="dt-plain-list">{data.channels.map((item, index) => <li key={index}>
-          <ExternalLink href={item.url} icon={item.source === 'github' ? 'pull' : 'message'}>{localized(t, item.label)}</ExternalLink>
+          {item.url ? <ExternalLink href={item.url} icon={item.source === 'github' ? 'pull' : 'message'}>{localized(t, item.label)}</ExternalLink>
+            : <span>{localized(t, item.label)}</span>}
         </li>)}</ul>
       </Details>
       {data.inputs.length > undelivered.length && <Details icon="inbox" title={t('deliveredInputs',

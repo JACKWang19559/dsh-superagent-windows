@@ -96,7 +96,7 @@ describe('feishu source', () => {
       const value = host({ sources: emptyRegistry(), ...overrides })
       const disposers: (() => unknown)[] = []
       applyFeishu({ orchestrator: value, effect: (effect: () => () => unknown) => { disposers.push(effect()) } } as never)
-      await vi.waitFor(() => expect(value.health.history).toBeDefined())
+      await vi.waitFor(() => expect(value.health.history).toMatchObject({ state: 'paused' }))
       const registered = value.sources.kind('feishu')
       // Snapshot health before disposal clears the registered entries.
       const health = { ...value.health }
@@ -1027,6 +1027,9 @@ it('reports GitHub as failing only after the configured number of consecutive fa
     observePulls: false, observeComments: false, observeCi: false })
 })
 describe('feishu event consumer', () => {
+  // These process assertions use executable /bin/sh stubs, unavailable to native Windows CreateProcess.
+  // Keep the history-loop test below on every host: it does not depend on the event consumer starting.
+  const shellIt = it.skipIf(process.platform === 'win32')
   let dir: string
   let controller: AbortController
   let running: Promise<unknown> | undefined
@@ -1086,7 +1089,7 @@ describe('feishu event consumer', () => {
   const event = (id: string, chat: string, type: 'group' | 'p2p') => JSON.stringify({ message_id: id, chat_id: chat, chat_type: type,
     sender_id: 'ou_alice', sender_type: 'user', content: 'fix it', create_time: String(Date.now()),
     ...type === 'group' ? { mentions: [{ id: 'ou_bot', name: 'Bot' }] } : {} })
-  it('takes in the event lines it reads, records each chat as direct or not, and reports a malformed line without stopping', async () => {
+  shellIt('takes in the event lines it reads, records each chat as direct or not, and reports a malformed line without stopping', async () => {
     writeFileSync(join(dir, 'events'), [event('om_1', 'oc_group', 'group'), event('om_2', 'oc_dm', 'p2p'), 'not json',
       event('om_3', 'oc_group', 'group')].join('\n') + '\n')
     const { ctx, health, store } = consumerSource(cli('events'))
@@ -1097,7 +1100,7 @@ describe('feishu event consumer', () => {
     expect(health.feishu).toMatchObject({ state: 'error', detail: expect.stringContaining('JSON') })
     controller.abort(); await running; store.close()
   }, 20_000)
-  it('drops the events it reads once the Source is off', async () => {
+  shellIt('drops the events it reads once the Source is off', async () => {
     writeFileSync(join(dir, 'events'), event('om_9', 'oc_group', 'group') + '\n')
     const { ctx, health, store, turnOff } = consumerSource(cli('late'))
     running = runFeishu(ctx, controller.signal)
@@ -1143,7 +1146,7 @@ describe('feishu event consumer', () => {
     expect(off.chats).toEqual(['oc_a', 'oc_b'])
     expect(off.cursors.oc_dm).toBe(hour)
   }, 20_000)
-  it('reports an error when the consumer is not ready within 45 seconds', async () => {
+  shellIt('reports an error when the consumer is not ready within 45 seconds', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const { ctx, health, store } = consumerSource(cli('never'))
     running = runFeishu(ctx, controller.signal)
@@ -1155,13 +1158,13 @@ describe('feishu event consumer', () => {
     expect(alive(pid)).toBe(false)
     controller.abort(); await running; store.close()
   }, 20_000)
-  it('reports a warning the consumer prints as an error', async () => {
+  shellIt('reports a warning the consumer prints as an error', async () => {
     const { ctx, health, store } = consumerSource(cli('warn'))
     running = runFeishu(ctx, controller.signal)
     await vi.waitFor(() => expect(health.feishu).toMatchObject({ state: 'error', detail: 'WARN the connection was reset' }), until)
     controller.abort(); await running; store.close()
   }, 20_000)
-  it('stops the consumer within five seconds once the Source is off', async () => {
+  shellIt('stops the consumer within five seconds once the Source is off', async () => {
     vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
     const { ctx, health, store, turnOff } = consumerSource(cli('ready'))
     running = runFeishu(ctx, controller.signal)
@@ -1173,7 +1176,7 @@ describe('feishu event consumer', () => {
     expect(alive(pid)).toBe(false)
     controller.abort(); await running; store.close()
   }, 20_000)
-  it('starts the consumer again after it exits, and is ready once the next run listens', async () => {
+  shellIt('starts the consumer again after it exits, and is ready once the next run listens', async () => {
     const { ctx, health, store } = consumerSource(cli('flaky'))
     running = runFeishu(ctx, controller.signal)
     const exited = { state: 'error', detail: expect.stringContaining('exited (1, ready=true)') }

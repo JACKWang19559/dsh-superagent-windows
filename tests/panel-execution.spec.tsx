@@ -1,5 +1,7 @@
 // @vitest-environment jsdom
 // The Execution status, a Ticket, and the Execution settings.
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { act } from 'react'
 import { expect, it } from 'vitest'
 import { en, zh } from '../src/client/locales.ts'
@@ -129,14 +131,15 @@ it('keeps what a person types in the Execution settings, converting it once on s
   await type(blocked(), 'gh-personal ')
   expect(blocked().value).toBe('gh-personal ')
   await type(blocked(), 'gh-personal, gh-other')
-  await type(root(), '/srv/my work ')
-  expect(root().value).toBe('/srv/my work ')
+  const directory = join(tmpdir(), 'my work')
+  await type(root(), `${directory} `)
+  expect(root().value).toBe(`${directory} `)
   await type(workers(), '')
   expect(workers().value).toBe('')
   await type(workers(), '2')
   await click(zh.save)
-  expect(server.requests.find(request => request.path === 'settings/executor')?.body).toMatchObject({ value: { blockedCommands: ['gh-personal', 'gh-other'], directory: '/srv/my work ', maxWorkers: 2 } })
-  expect(server.settings.executor).toMatchObject({ blockedCommands: ['gh-personal', 'gh-other'], directory: '/srv/my work', maxWorkers: 2 })
+  expect(server.requests.find(request => request.path === 'settings/executor')?.body).toMatchObject({ value: { blockedCommands: ['gh-personal', 'gh-other'], directory: `${directory} `, maxWorkers: 2 } })
+  expect(server.settings.executor).toMatchObject({ blockedCommands: ['gh-personal', 'gh-other'], directory, maxWorkers: 2 })
 })
 
 it('says why an Input was not delivered on its Ticket\'s page, in either language', async () => {

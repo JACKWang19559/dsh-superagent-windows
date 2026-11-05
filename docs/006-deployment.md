@@ -4,7 +4,7 @@ Use this guide to install, configure and operate dsh-superagent. It covers accou
 
 ## What runs
 
-- **A dedicated DeepSeek Harness profile**, called `superagent` in this guide. Create it from the Web profile template. It loads the bundle and serves its panel on `127.0.0.1`. Keep it separate from the profile you work in: the plugin changes process-wide `PATH` and git settings, and its process needs independent restarts and upgrades.
+- **A dedicated DeepSeek Harness profile**, called `superagent` in this POSIX service guide. Create it from the Web profile template. It loads the bundle and serves its panel on `127.0.0.1`. A separate service permits independent restarts and upgrades. The Windows Desktop integration uses the existing desktop profile and its own Host lifecycle instead; see the desktop guide linked from the repository README. Account PATH and git settings are scoped to managed subprocesses rather than the host process.
 - **An agent GitHub account.** The agent comments, pushes branches and opens pull requests as this account, through a GitHub CLI signed in only as that account.
 - **Optional:** a Feishu bot for chat requests.
 
@@ -16,7 +16,7 @@ The bundle defines `dsh-superagent-worker` for Executors and `dsh-superagent-rou
 
 Opening a blank managed Session in the Web UI can select the profile's default preset. dsh-superagent restores its role-specific preset before the first turn.
 
-Both presets run with `danger-full-access` as the operator's OS user and read messages from subscribed Threads. Account wrappers choose the agent's credentials by default; they do not isolate the process. A worker can execute programs by path and read the operator's home directory. For isolation, use a dedicated OS account containing only the agent's credentials.
+Both presets preserve the operator's default or persisted DSH permission preset and read messages from subscribed Threads. Choose the managed Session's permissions explicitly in DSH; resuming a task does not elevate them. Account wrappers choose the agent's credentials by default and do not create an OS security boundary. With broad permissions, a worker can execute programs by path and read the operator's home directory. For OS isolation, use a dedicated account containing only the agent's credentials.
 
 ## Prerequisites
 
@@ -219,7 +219,7 @@ Setup uses the DeepSeek Harness subprocess service, as worker shells do. It remo
 
 Setup verifies the GitHub repository and the agent's push access, writes the worker environment, and checks that git uses only the agent credentials for github.com. A Feishu setup failure disables only the Feishu Source.
 
-The process environment that setup writes:
+The managed subprocess environment that setup prepares (without changing the host's `process.env`):
 
 - **Command shims** in `<stateDir>/worker-bin`, first on `PATH`: `gh` runs the agent's CLI; `lark-cli` runs the bot's CLI; blocked commands fail. A shim removes its own directory from `PATH` before it runs its target.
 - **git configuration** in `<stateDir>/worker-gitconfig`: replaces the operator's global and system git configuration. It selects the agent CLI as the github.com credential helper, rewrites GitHub SSH addresses to HTTPS and defines Git LFS filters. Personal git settings such as an HTTP proxy do not apply. No commit identity is set here, git never prompts for credentials, and `GH_TOKEN` and `GITHUB_TOKEN` are removed.

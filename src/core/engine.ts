@@ -1,6 +1,6 @@
 /** The domain Engine: the single entry point of the core, and the role interfaces its callers receive. */
 import { UserError } from './errors.ts'
-import { isoTime, liveTicket } from './model.ts'
+import { followupOwners, isoTime, liveTicket } from './model.ts'
 import type { ChannelRef, Decision, PolicyEffect, ThreadRef, Ticket, Trigger } from './model.ts'
 import type { Candidate, Repositories } from './ports.ts'
 import type { EngineOptions } from './part.ts'
@@ -115,6 +115,11 @@ export class Engine {
       this.evals.withdraw(trigger)
       this.tickets.attach(ticketId, trigger, note)
       this.evals.routed(triggerId, ticketId)
+      // Intake could not notify before attachment; only after routing ends its Eval does the worker own this message.
+      // An ended ticket emits ticket.resumed when it wakes, including after a pause, so it needs no extra follow-up event here.
+      if (liveTicket(this.repo.tickets.get(ticketId)!) && followupOwners(trigger, this.repo).includes(ticketId)) {
+        this.options.emit?.({ type: 'trigger.followup', at: this.options.now?.() ?? new Date().toISOString(), data: { triggerId } })
+      }
       this.tickets.wake(ticketId)
       return this.repo.tickets.get(ticketId)!
     })

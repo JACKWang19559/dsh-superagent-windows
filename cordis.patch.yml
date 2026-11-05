@@ -6,6 +6,8 @@
       name: dsh-superagent
     - id: dsh-superagent-github
       name: dsh-superagent/github-watch
+    - id: dsh-superagent-local
+      name: dsh-superagent/local-watch
     # Optional Feishu Source; requires configuring a bot CLI after enabling.
     - id: dsh-superagent-feishu
       name: dsh-superagent/feishu-watch
@@ -14,9 +16,9 @@
     # It is DSH's `standard` preset with only what a worker needs, and a shell whose foreground command moves to a background job
     # after 5 seconds, so a long command does not hold back a person's message, which the Session takes at its next step. Left
     # out: questions to a person, presenting, plan mode, the plugin manager and market, scheduling, goals, workflows, web fetch,
-    # and forked subagents, which would run under this preset; spawned subagents run under `standard`, whose shell moves a
-    # command to a background job only after 60 seconds, as a subagent's jobs are killed when it ends. A preset row has no
-    # setting that hides it from the preset picker, so its name and description say whom it is for.
+    # and forked subagents. Spawned subagents use this controlled preset too, so they keep the agent account environment;
+    # they must collect their background results before ending. A preset row has no setting that hides it from the
+    # preset picker, so its name and description say whom it is for.
     - id: dsh-superagent-worker-preset
       name: '@deepseek-ai/dsh-agent-preset'
       config:
@@ -41,7 +43,10 @@
             group: true
             isolate:
               shell: true
+              subprocess: true
             config:
+              - id: execution-subprocess
+                name: dsh-superagent/execution-subprocess
               - id: bash-sandbox
                 name: '@deepseek-ai/dsh-bash-sandbox'
                 disabled: !!js process.platform === 'win32'
@@ -108,7 +113,7 @@
                   toolName: subagent
                   modelSelection: true
                   modelDiscovery: true
-                  agentPreset: standard
+                  agentPreset: dsh-superagent-worker
           - id: tool-todo
             name: '@deepseek-ai/dsh-tool-todo'
             config:
@@ -141,7 +146,10 @@
             group: true
             isolate:
               shell: true
+              subprocess: true
             config:
+              - id: execution-subprocess
+                name: dsh-superagent/execution-subprocess
               - id: bash-sandbox
                 name: '@deepseek-ai/dsh-bash-sandbox'
                 disabled: !!js process.platform === 'win32'

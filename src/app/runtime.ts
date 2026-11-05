@@ -16,6 +16,7 @@ import { lockSync } from 'proper-lockfile'
 import { Engine, key, reasonText, type EngineForSettings, type ReceiveResult, type Ticket, type Trigger } from '../core/index.ts'
 import { allowedSender, settingsPolicy } from '../policy.ts'
 import { SourceRegistry } from '../sources/registry.ts'
+import { initializeLocalPolicy, LocalTasks } from '../sources/local.ts'
 import { Commands } from '../infra/commands.ts'
 import type { Deployment, Machine } from '../deployment.ts'
 import { environmentOf, ticketEnvironment, type Variable } from './execution-environment.ts'
@@ -107,8 +108,10 @@ export class Runtime extends Service implements SourceHost {
       const board = this.board
       const effects = this.effects = new Effects(store, board)
       const sources = this.sources = new SourceRegistry(() => store.settings(), board, kind => {
+        if (this.closing()) return () => {}
+        if (kind.kind === 'local') initializeLocalPolicy(store)
         // Sync source member lists once startup completes when a source plugin loads dynamically.
-        if (kind.policy?.sync) void this.ready?.then(() => this.settings.syncable().includes(kind.kind) ? this.settings.sync(kind.kind) : undefined)
+        if (kind.policy?.sync) void this.ready?.then(() => !this.closing() && this.settings.syncable().includes(kind.kind) ? this.settings.sync(kind.kind) : undefined)
           .catch(() => { /* sync() records its failure in health. */ })
         return () => {}
       })
@@ -195,22 +198,26 @@ export class Runtime extends Service implements SourceHost {
   idle(): Promise<void> { return this.passes.idle() }
   pump(): Promise<void> { return this.passes.pump() }
   sendReplies(): Promise<void> { return this.outbox.sent() }
-  private closing(): boolean { return this.closingFlag }
+  private closing(): boolean { return this.closingFlag || this.lifetime.aborted }
   /** Hold evaluation, dispatch, and outbound delivery while paused or awaiting setup; sources still record incoming triggers. */
   private paused(): boolean { return !this.setup.configured() || this.store.settings().paused }
   private async initialize(): Promise<void> {
     // Register management HTTP routes before setup completes so operators can fix setup problems in the UI.
     this.disposers.push(registerHttp(this.ctx, this.httpHost()))
-    if (!await this.setup.run(this.store.settings())) {
+    const configured = await this.setup.run(this.store.settings())
+    if (this.closing()) return
+    if (!configured) {
       this.runtimeHealth.set({ ...health('paused', 'setupPending'), at: now() })
       return
     }
     this.sessions.install()
     this.executor.install()
     await this.sessions.ensure(this.masterId, this.machine.stateDir, 'dsh-superagent orchestrator', 'orchestrator')
-    for (const id of this.settings.syncable()) await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
-    // If stop() was called while awaiting setup, session creation, or policy sync, do not start background loops.
     if (this.closing()) return
+    for (const id of this.settings.syncable()) {
+      await this.settings.sync(id).catch(() => { /* sync() records its failure in health. */ })
+      if (this.closing()) return
+    }
     this.executor.resume()
     this.passes.start()
     this.effects.start()
@@ -218,8 +225,10 @@ export class Runtime extends Service implements SourceHost {
   }
   private httpHost(): HttpHost {
     const runtime = this
-    const { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks, setup, passes } = this
-    return { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, ready, sourceLinks,
+    const { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, sourceLinks, setup, passes } = this
+    const localTasks = new LocalTasks({ store, sources, engine, receive: trigger => runtime.receive(trigger), configured: () => setup.configured() })
+    return { store, sources, prompts, sessions, settings, engine, executor, health, machine, masterId, sourceLinks, localTasks,
+      get ready() { return runtime.ready },
       get deployment() { return setup.deployment },
       get setupProblem() { return setup.problem }, get feishuProblem() { return setup.feishuProblem },
       configured: () => setup.configured(), links: () => runtime.links(), ticketEnvironment: ticket => runtime.ticketEnvironment(ticket),
@@ -229,26 +238,27 @@ export class Runtime extends Service implements SourceHost {
   stop(): Promise<void> { return this.stopping ??= this.shutdown() }
   private async shutdown(): Promise<void> {
     this.closingFlag = true; const passes = this.passes.stop(); this.stopped.abort()
-    try {
-      this.assessor.stop()
+    const failures: unknown[] = []
+    const clean = async (release: () => unknown) => { try { await release() } catch (error) { failures.push(error) } }
+    await clean(() => this.assessor.stop())
+    const waiting: Promise<unknown>[] = [passes, this.effects.drain()]
+    await clean(() => {
       const ids = [this.masterId, ...this.store.tickets.list().map(ticket => workerSessionId(ticket.id))]
       const agents = ids.map(id => this.ctx.agents.get(id as SessionId)).filter((agent): agent is Agent => agent !== undefined)
-      for (const agent of agents) agent.cancel({ kind: 'user' }, { keepInbox: true })
-      await Promise.allSettled([passes, this.effects.drain(), ...agents.map(agent => agent.whenIdle())])
-      // The workers' jobs and subagents stop too: their ends would start worker turns without the tool limits released below.
-      await this.executor.shutdown()
-      this.executor.dispose()
-      this.sessions.dispose()
-      for (const dispose of this.disposers.reverse()) dispose()
-      await this.ctx.sessionPersistence.flush()
-    } finally {
-      // Close the database before releasing the directory lock so another process cannot open the database mid-write; a compromised lock may already be released.
-      this.setup.restore()
-      try { this.store.close() } finally {
-        const unreleased = (error: unknown) => { this.ctx.logger.warn('dsh-superagent could not release its state directory lock: %s',
-          String(error)) }
-        await this.releaseLock?.().catch(unreleased)
-      }
-    }
+      for (const agent of agents) { agent.cancel({ kind: 'user' }, { keepInbox: true }); waiting.push(agent.whenIdle()) }
+    })
+    await Promise.allSettled(waiting)
+    // The workers' jobs and subagents stop too: their ends would start worker turns without the tool limits released below.
+    await clean(() => this.executor.shutdown())
+    // Every release still runs when an earlier one fails, including during partial startup.
+    await clean(() => this.executor.dispose())
+    await clean(() => this.sessions.dispose())
+    for (const dispose of this.disposers.splice(0).reverse()) await clean(dispose)
+    await clean(() => this.ctx.sessionPersistence.flush())
+    // Close the database before releasing the directory lock; a compromised lock may already be released.
+    await clean(() => this.store.close())
+    const unreleased = (error: unknown) => { this.ctx.logger.warn('dsh-superagent could not release its state directory lock: %s', String(error)) }
+    await this.releaseLock?.().catch(unreleased)
+    if (failures.length) throw new AggregateError(failures, 'dsh-superagent shutdown failed')
   }
 }

@@ -6,8 +6,10 @@ import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, beforeEach, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
+// The service controller uses Unix Python fcntl locks, signals, and tmux; native Windows desktop does not run it.
+describe.skipIf(process.platform === 'win32')('POSIX service script', () => {
 let root: string
 let server: Server | undefined
 let sleepers: ChildProcess[] = []
@@ -232,3 +234,4 @@ it('does not signal a process that took the recorded service PID, and keeps a st
   expect(await run('stop', '--stop-timeout', '1')).toMatchObject({ code: 1, stderr: expect.stringContaining('Graceful stop timed out') })
   expect(existsSync(join(control('superagent'), 'manually-stopped'))).toBe(true)
 }, 20_000)
+})

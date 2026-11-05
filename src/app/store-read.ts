@@ -66,6 +66,12 @@ export function storeReads(db: DatabaseSync) {
   },
   /** Newest decisions of the given kinds, for surfaces that must surface rare outcomes among many ignores. */
   decisionsOfKinds: (kinds: string[], limit = 30): Decision[] => db.prepare(`SELECT value FROM decision WHERE json_extract(value, '$.kind') IN (${kinds.map(() => '?').join(',')}) ORDER BY rowid DESC LIMIT ?`).all(...kinds, limit).map(row => JSON.parse(String(row.value)) as Decision),
+  /** Recent persisted Channel messages, oldest first, bounded by a Ticket or Thread; pending/dropped receipts remain readable. */
+  channelReplies: (target: { ticketId: string } | { thread: string }, limit = 100): Receipt[] => {
+    const byTicket = 'ticketId' in target
+    return values<Receipt>(`SELECT value FROM outbox WHERE value ->> '${byTicket ? '$.ticketId' : '$.channel.thread'}' = ?
+      ORDER BY rowid DESC LIMIT ?`, byTicket ? target.ticketId : target.thread, Math.max(1, Math.min(100, limit))).reverse()
+  },
   /** Messages whose `reply` effect failed, with consecutive failure count and last error, oldest first. */
   failingReplies: (): (Receipt & { attempts: number; error: string })[] => db.prepare(`SELECT o.value, e.attempts, e.error FROM effect e
     JOIN outbox o ON o.id = e.key WHERE e.kind = 'reply' AND e.attempts > 0 ORDER BY e.seq`).all()

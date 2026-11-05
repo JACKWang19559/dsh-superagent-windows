@@ -12,10 +12,12 @@ export async function resolveRoleModel(ctx: Context, model: RoleModel): Promise<
 }
 
 /** Seed a role's configured model onto a brand-new session before its first request, leaving later manual or durable selections intact. */
-export async function initializeRoleModel(ctx: Context, agent: Agent, model: RoleModel | null): Promise<void> {
+export async function initializeRoleModel(ctx: Context, agent: Agent, model: RoleModel | null, signal?: AbortSignal): Promise<void> {
+  signal?.throwIfAborted()
   if (!model) return
   if (agent.session.requestHeader() || agent.session.snapshotEvents().some(event => event.type === 'model/selection')) return
   const selected = await resolveRoleModel(ctx, model)
+  signal?.throwIfAborted()
   // Avoid selectModel because it mutates the global DSH default; inject the selection for the initial request only.
   agent.session.append('model/selection', selected)
   let initial = true

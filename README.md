@@ -8,6 +8,12 @@ dsh-superagent is a proactive coding agent for one GitHub repository, packaged a
 
 It is also a way of working with an agent: **take as little human attention as possible, and give as much value as possible.** An agent that can act for a whole team can also waste a whole team's attention, so it acts only when asked or when a rule the team wrote allows it, and speaks only when someone must act or can use a result. [docs/000-philosophy.md](docs/000-philosophy.md) explains the principle and what it asks of the operator.
 
+## Windows desktop candidate
+
+This branch adds native Windows execution support and a desktop task entry to the upstream research prototype. It is an independent candidate for the Windows fork: the Windows.6 on-demand launcher, project conversation tabs, and repository/base-branch selection are not ported into this implementation. Use a separate `DSH_HOME`, desktop user-data directory, and `stateDir` for evaluation; see [Windows Desktop setup](docs/009-windows-desktop.md).
+
+Validation on Windows: 1277 tests passed, 29 POSIX-only tests skipped, typecheck and build passed. An isolated official Desktop `0.2.1-rc.5` also passed offline configured startup, authenticated API, local request deduplication, and restart persistence checks. Real model/GitHub/Feishu task delivery and visual acceptance remain unverified.
+
 ## Setup
 
 Setup has many steps, so an agent does it with you. Ask your coding agent:
@@ -29,6 +35,7 @@ Read the numbered documents in order; each builds only on the ones before it.
 - [006 Deployment](docs/006-deployment.md): manual setup, configuration, upgrades and troubleshooting
 - [007 Architecture](docs/007-architecture.md)
 - [008 Cookbook](docs/008-cookbook.md): adding a Source
+- [009 Windows Desktop](docs/009-windows-desktop.md): native Windows setup and the desktop task entry
 
 ## Development
 

@@ -8,6 +8,10 @@ import type { SettingsView } from './views/settings.ts'
 import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketListView } from './views/tickets.ts'
+import type { LocalConversation, LocalTaskResult } from '../sources/local.ts'
+
+export const LOCAL_TASK_TEXT_LIMIT = 16_000
+export interface LocalTaskRequest { requestId: string; text: string }
 
 export const TICKET_FILTERS = ['open', 'person', 'working', 'idle', 'ended'] as const
 export const THREAD_FILTERS = ['subscribed', 'evaluating', 'recent', 'all'] as const
@@ -25,13 +29,15 @@ export interface Api {
   'GET settings': { response: SettingsView }
   'POST sources/:id/labels': { response: { added: string[] } }
   'GET threads': { query?: Paged & { filter?: ThreadFilter }; response: ThreadListView }
-  'GET threads/:key': { query?: { limit?: number; before?: string; around?: string }; response: ThreadDetailView }
+  'GET threads/:key': { query?: { limit?: number; before?: string; around?: string }; response: ThreadDetailView & { local?: LocalConversation } }
   'POST threads/:key/unsubscribe': { response: { removed: boolean; thread: string; context_delivery: Delivery } }
   'POST triggers/:id/requeue': { response: { queued: boolean } }
   'GET decisions': { query?: Paged & { kind?: string; window?: '24h' }; response: DecisionListView }
   'POST decisions/:id/dismiss': { response: { dismissed: true } }
   'GET tickets': { query?: Paged & { state?: TicketFilter }; response: TicketListView }
   'GET tickets/:id': { response: TicketPageView }
+  'POST local/tasks': { body: LocalTaskRequest; response: LocalTaskResult }
+  'POST tickets/:id/messages': { body: LocalTaskRequest; response: LocalTaskResult }
   'POST tickets/:id/retry': { response: { retried: true } }
   'POST tickets/:id/stop': { response: { stopped: true } }
   'POST executor/pause': { body: { paused: boolean }; response: { paused: boolean } }
