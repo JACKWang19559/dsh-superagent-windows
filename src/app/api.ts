@@ -9,6 +9,8 @@ import type { SourceStatusView } from './views/sources.ts'
 import type { DecisionListView, SearchView, ThreadDetailView, ThreadListView } from './views/threads.ts'
 import type { TicketListView } from './views/tickets.ts'
 import type { LocalConversation, LocalTaskResult } from '../sources/local.ts'
+import type { WorkspaceFolderAction, WorkspaceFoldersView } from './workspace-folders.ts'
+export type { WorkspaceFolder, WorkspaceFolderAction, WorkspaceFoldersView } from './workspace-folders.ts'
 
 export const LOCAL_TASK_TEXT_LIMIT = 16_000
 export interface LocalTaskRequest { requestId: string; text: string }
@@ -27,6 +29,8 @@ export interface Api {
   'GET search': { query: { q: string }; response: SearchView }
   'GET sources': { response: SourceStatusView[] }
   'GET settings': { response: SettingsView }
+  'GET workspace-folders': { response: WorkspaceFoldersView }
+  'POST workspace-folders': { body: WorkspaceFolderAction; response: WorkspaceFoldersView }
   'POST sources/:id/labels': { response: { added: string[] } }
   'GET threads': { query?: Paged & { filter?: ThreadFilter }; response: ThreadListView }
   'GET threads/:key': { query?: { limit?: number; before?: string; around?: string }; response: ThreadDetailView & { local?: LocalConversation } }

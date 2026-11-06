@@ -12,6 +12,8 @@ import type { ISessions } from '@deepseek-ai/dsh-api-session-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { openKnownSession, SessionNavigationError } from '../navigation.ts'
 import { App } from './app.tsx'
+import { ChatReplies } from './chat-replies.tsx'
+import { WorkspaceFolders } from './workspace-folders.tsx'
 import { PluginConfig, usePageForm } from './deployment.tsx'
 import { en, zh } from './locales.ts'
 import type { T } from './text.ts'
@@ -55,4 +57,8 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('sidebar.panellist', () => ctx.slots.register({ name: 'sidebar.panellist', id: PANEL_ID, order: 10, label: () => t('panel'), locale: NS }, HammerIcon))
   ctx.slots.inject('plugins.row.config', () => ctx.slots.register({ name: 'plugins.row.config', key: `${ENTRY}#${ENTRY}`, locale: NS },
     (props: PluginConfigViewProps & { t: T }) => <PluginConfig t={props.t} view={props.view} form={props.form} />))
+  ctx.slots.inject('conversation.chat.turnTail', () => ctx.slots.register({ name: 'conversation.chat.turnTail',
+    id: 'dsh-superagent-results', order: 20, locale: NS }, ChatReplies))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay',
+    id: 'dsh-superagent-folders', locale: NS }, WorkspaceFolders))
 }

@@ -255,7 +255,7 @@ Each model request binds the Session to the current prompt revision. The revisio
 ## Dependency rules
 
 - **Explicit, narrow dependencies.** Each class receives an interface that names what it uses, mostly as `Pick` types of other classes: `ExecutorHost`, `AssessorHost`, `SessionsHost`, `SettingsHost`, `SetupHost`, `PassesHost` and `OutboxHost` for the core classes, and `HttpHost`, `MainToolsHost`, `ExecutorToolsHost`, `ResourceHost`, `LinkHost` and `SourceContextDeps` for the glue, with the Engine as the `Pick` of the role that calls it. The Runtime passes itself only behind such an interface. A Source plugin injects the `orchestrator` service, which its type names as a `SourceHost`: the registry and `context(kind)`; its kind's code sees only its `SourceContext`.
-- **What may import what.** `src/core` imports nothing outside itself apart from Node's hashing, and does no I/O. `src/sources` imports nothing from `src/app`. The panel imports only types from the host side, and the plain values of `src/admission.ts`, `src/limits.ts`, `src/setup.ts`, `src/navigation.ts`, `src/sources/host.ts`, `src/core/errors.ts`, `src/core/reasons.ts` and the filter lists of `src/app/api.ts`.
+- **What may import what.** `src/core` imports nothing outside itself apart from Node's hashing, and does no I/O. `src/sources` imports nothing from `src/app`. The panel imports only types from the host side, and the plain values of `src/admission.ts`, `src/limits.ts`, `src/setup.ts`, `src/navigation.ts`, `src/workspace-path.ts`, `src/sources/host.ts`, `src/core/errors.ts`, `src/core/reasons.ts` and the filter lists of `src/app/api.ts`.
 - **One writer per state.** Each kind of state has one writer, and the others read it or ask that writer.
 
   | State | Writer |
@@ -401,6 +401,14 @@ Some generic modules still refer directly to GitHub or Feishu:
 | `src/client/marks.ts` | The marks of the states the views classify: a Ticket's or a Thread's stage, a Source's state and a Decision's outcome, each as a dot, an icon, a tone and a label |
 | `src/client/locales.ts` | All copy in both languages, and the glossary of [001 Domain model](001-domain.md) |
 | `src/client/client.css`, `css.d.ts` | The panel's stylesheet, loaded as text |
+| `src/workspace-path.ts` | Browser-safe workspace path keys: Windows case and separator normalization, preserving POSIX case |
+| `src/app/workspace-folders.ts` | Logical folder metadata validation, revision-checked edits, and read-only repository/task grouping with manual overrides |
+| `src/client/workspace-folders.tsx` | Folder creation and management, native-workspace portals, assignments, drag targets and saved collapse preferences |
+| `src/client/workspace-folders-dom.ts` | Reversible adapter for the native workspace header and flat workspace sections; retains native React rows and skips unsupported layouts |
+| `src/client/workspace-folders.css` | Host-themed logical folder headings and management dialog styles |
+| `src/client/chat-results.ts` | Read-only projection of result replies confirmed by the same tool call's sent receipt, with retry and existing-text deduplication |
+| `src/client/chat-replies.tsx` | Native conversation turn-tail result cards from persisted chat sources, without replaying replies or requesting a model |
+| `src/client/chat-replies.css` | Scoped result-card and safe Markdown styling in native conversations |
 
 `src/sources/github.ts`, `src/sources/feishu.ts` and `src/sources/local.ts` are the Source plugin entries, built by `tsdown.config.ts` and exported in `package.json` as `./github-watch`, `./feishu-watch` and `./local-watch`. The bundle's `cordis.patch.yml` inserts the orchestrator and these three Source plugins, with Feishu disabled. The local Source receives only explicit management requests as `local:owner`; its first registration saves the owner in its Policy allowed list, preserving any later removal. Local follow-ups attach through the Engine's existing subscriptions and retain the original Ticket Mandate. The local Channel reads the Outbox's persisted receipts rather than maintaining another message store.
 
@@ -408,6 +416,8 @@ Some generic modules still refer directly to GitHub or Feishu:
 
 | Test | Covers |
 | --- | --- |
+| `tests/chat-replies.spec.tsx` | Confirmed historical result cards, safe links, hidden/nested tool calls, deduplication and no model/API requests |
+| `tests/workspace-folders.spec.tsx` | Native header placement and row identity, CRUD, drag assignment, conflict handling, search/collapse restoration and cleanup of supported/unsupported layouts |
 | `tests/core-engine.spec.ts` | Domain rules on in-memory repositories: receiving, Eval, fan-out, resume and stop, interrupted Assignments, the pause, Policy changes, reports and outcomes, attaching, replies, failed deliveries and dismissed problems |
 | `tests/stage.spec.ts` | The Ticket stages, row by row |
 | `tests/policy.spec.ts` | Source scope, the gate, the admission table, Mandate revalidation, the Policy version, settings migrations and assessment outcomes |

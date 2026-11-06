@@ -297,6 +297,8 @@ const SourceSave = z.object({ enabled: z.boolean(), config: z.unknown() })
 const ROUTES: { [K in keyof Api]: Route<K> } = {
   'GET state': { answer: stateView },
   'GET overview': { answer: overviewView },
+  'GET workspace-folders': { answer: () => ({ revision: 0, folders: [], assignments: {} }) },
+  'POST workspace-folders': { body: true, answer: () => refuse(400, 'Folder writes use the dedicated workspace folder fixture.') },
   'GET search': { query: ['q'], answer: async ({ query }) => {
     const q = query.q ?? ''
     await server.searching?.(q)

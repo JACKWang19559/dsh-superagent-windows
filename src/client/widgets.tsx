@@ -48,15 +48,19 @@ function Inlines({ parts }: { parts: Inline[] }) {
     : part.kind === 'link' ? <a key={index} className="dt-inline-link" href={part.url} title={part.url} {...external}>{part.text}</a>
     : <Fragment key={index}>{part.text}</Fragment>)}</>
 }
-/** Renders a safe Markdown subset (headings, lists, paragraphs, bold, inline code, links) without interpreting raw HTML. */
-export function MarkdownLite({ text }: { text: string }) {
-  const { t } = usePanel()
-  return <div className="dt-md">{markdownBlocks(readableMarkers(t, text)).map((block, index) => {
+/** Context-free Markdown rendering for both management pages and native conversation extensions. */
+export function MarkdownContent({ text }: { text: string }) {
+  return <div className="dt-md">{markdownBlocks(text).map((block, index) => {
     if (block.kind !== 'list') return <p key={index} className={block.kind === 'heading' ? 'dt-md-heading' : undefined}><Inlines
       parts={inlines(block.text)} /></p>
     const items = block.items.map((item, at) => <li key={at}><Inlines parts={inlines(item)} /></li>)
     return block.ordered ? <ol key={index}>{items}</ol> : <ul key={index}>{items}</ul>
   })}</div>
+}
+/** Renders the shared safe Markdown subset with localized media markers inside the management panel. */
+export function MarkdownLite({ text }: { text: string }) {
+  const { t } = usePanel()
+  return <MarkdownContent text={readableMarkers(t, text)} />
 }
 function MoreToggle({ open, onToggle }: { open: boolean; onToggle: () => void }) {
   const { t } = usePanel()

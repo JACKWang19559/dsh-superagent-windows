@@ -28,6 +28,8 @@ import { settingsView } from './views/settings.ts'
 import { sourcesStatus, type SetupState } from './views/sources.ts'
 import { decisionList, search, threadDetail, threadList } from './views/threads.ts'
 import { executorLoad, ticketDetail, ticketList } from './views/tickets.ts'
+import { KV } from '../kv.ts'
+import { WorkspaceFolderError, WorkspaceFoldersConflict, updateWorkspaceFolders, workspaceFoldersView } from './workspace-folders.ts'
 
 export interface HttpHost {
   readonly store: Store
@@ -86,9 +88,9 @@ function failure(error: unknown): [number, Record<string, unknown>] {
     return [400, { error: `Invalid settings: ${issues.map(issue => issue.path).join(', ')}`, issues }]
   }
   if (error instanceof SetupError) return [400, { error: error.message, setup: error.problem }]
-  if (error instanceof RouteError || error instanceof LocalTaskError) return [error.status, { error: error.message }]
+  if (error instanceof RouteError || error instanceof LocalTaskError || error instanceof WorkspaceFolderError) return [error.status, { error: error.message }]
   if (error instanceof UserError) return [error.missing ? 404 : 400, { error: error.message, code: error.code, values: error.values }]
-  if (error instanceof SettingsConflict || error instanceof PromptConflict) return [409, { error: error.message }]
+  if (error instanceof SettingsConflict || error instanceof PromptConflict || error instanceof WorkspaceFoldersConflict) return [409, { error: error.message }]
   return [500, { error: error instanceof Error ? error.message : String(error) }]
 }
 
@@ -157,6 +159,8 @@ function routes(runtime: HttpHost): Routes {
   const { store } = runtime
   const ticket = (id: string) => { if (!store.tickets.get(id)) throw new RouteError(404, 'Ticket not found'); return id }
   const promptBody = (input: { body: (maxBytes?: number) => Promise<unknown> }) => input.body(4 * runtime.machine.promptMaxChars.get() + 4096)
+  const folderSource = () => ({ repository: runtime.configured() ? runtime.deployment.repository : undefined,
+    stateDir: runtime.machine.stateDir, directories: store.tickets.list().flatMap(ticket => ticket.execution ? [ticket.execution.directory] : []) })
   return {
     'GET state': () => stateView(runtime),
     'GET overview': () => overview(views(runtime), runtime.health, policyVersion(store.settings()),
@@ -164,6 +168,16 @@ function routes(runtime: HttpHost): Routes {
     'GET search': ({ query }) => search(views(runtime), query.q ?? '', runtime.sourceLinks),
     'GET sources': () => sourcesStatus(views(runtime), runtime.health, setupState(runtime)),
     'GET settings': () => settingsView(store, runtime.sources, runtime.health, setupState(runtime), runtime.machine.stateDir),
+    'GET workspace-folders': () => workspaceFoldersView(store.get(KV.workspaceFolders.state), folderSource()),
+    'POST workspace-folders': async ({ body }) => {
+      const request = await body(32 * 1024)
+      return store.atomic(() => {
+        const source = folderSource()
+        const next = updateWorkspaceFolders(store.get(KV.workspaceFolders.state), source, request)
+        store.set(KV.workspaceFolders.state, next)
+        return workspaceFoldersView(next, source)
+      })
+    },
     'POST sources/:id/labels': ({ params }) => runtime.settings.refreshLabels(params.id),
     'GET threads': ({ query }) => {
       const { filter, offset, limit } = ThreadsQuery.parse(query)

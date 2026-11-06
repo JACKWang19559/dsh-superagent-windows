@@ -1,4 +1,7 @@
-import { expect, it } from 'vitest'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { expect, it, onTestFinished, vi } from 'vitest'
 import { z } from 'zod'
 import { registerHttp, sameOrigin } from '../src/app/http.ts'
 import { PromptConflict } from '../src/app/prompts.ts'
@@ -6,6 +9,11 @@ import { SettingsConflict } from '../src/app/settings.ts'
 import type { HttpHost } from '../src/app/http.ts'
 import { SettingsSchema } from '../src/policy.ts'
 import { SetupError } from '../src/setup.ts'
+import { Store } from '../src/app/store.ts'
+import type { WorkspaceFoldersView } from '../src/app/api.ts'
+import type { Ticket } from '../src/core/index.ts'
+import { KV } from '../src/kv.ts'
+import { normalizeWorkspacePath } from '../src/workspace-path.ts'
 
 type Handler = (req: unknown, res: unknown) => Promise<void>
 type Headers = Record<string, string | undefined>
@@ -104,4 +112,137 @@ it('answers a prompt save that lost a race with 409, and a settings body over 12
   expect(await call('PUT', 'settings/executor', { value, revision: 0 })).toEqual({ status: 400,
     body: { error: `Request exceeds ${128 * 1024} bytes` } })
   expect(saves).toEqual([])
+})
+
+/** A real persistent Store and HTTP boundary, with runtime actions deliberately unavailable. */
+function folderServer(repository: string | undefined = 'Acme/Widgets') {
+  const directory = mkdtempSync(join(tmpdir(), 'orchestrator-folders-')), database = join(directory, 'state.sqlite')
+  let store = new Store(database)
+  const action = vi.fn(() => { throw new Error('Folder metadata must not launch work') })
+  onTestFinished(() => { store.close(); rmSync(directory, { recursive: true, force: true }) })
+  const call = (method: string, body?: unknown) => serve({ store, configured: () => !!repository,
+    machine: { stateDir: 'C:\\Agent\\State' }, deployment: { repository },
+    requestPass: action, checkSetup: action, models: action, engine: {}, sessions: {}, executor: {},
+  })(method, 'workspace-folders', body)
+  return { directory, call, action, get store() { return store },
+    reopen: () => { store.close(); store = new Store(database) },
+    view: async () => { const result = await call('GET'); expect(result.status).toBe(200); return result.body as unknown as WorkspaceFoldersView } }
+}
+const folderTicket = (id: string, directory?: string, ended = false): Ticket => ({
+  id, title: id, decisionId: '', mandate: { strength: 'explicit', policyVersion: '', basis: { via: 'listed' },
+    actor: { source: 'local', id: 'operator' }, scope: '' },
+  channels: [], assignments: [], inputs: [], undelivered: [], createdAt: '', updatedAt: '', origin: { triggerId: '', triggerIds: [] },
+  ...(directory ? { execution: { name: id, directory, assignment: '' } } : {}),
+  ...(ended ? { ended: { at: '', by: 'executor' as const, outcome: 'completed' as const } } : {}),
+})
+
+it('canonicalizes Windows workspace paths without changing POSIX case or roots', () => {
+  for (const [path, normalized] of [
+    ['C:\\Work\\Project\\', 'c:/work/project'], ['c:/WORK//Project/', 'c:/work/project'],
+    ['\\\\Server\\Share\\Project\\', '//server/share/project'], ['//SERVER/Share/PROJECT/', '//server/share/project'],
+    ['C:\\', 'c:/'], ['C:', 'c:'], ['C:Project', 'c:project'], ['/', '/'], ['/Work//Project/', '/Work/Project'],
+  ]) expect(normalizeWorkspacePath(path!)).toBe(normalized)
+})
+
+it('derives the repository group and every ticket directory, including ended tickets, without writes or work', async () => {
+  const fixture = folderServer(), { store } = fixture
+  store.tickets.save(folderTicket('active', 'D:\\Tasks\\Active'))
+  store.tickets.save(folderTicket('ended', 'D:\\Tasks\\Ended', true))
+  store.tickets.save(folderTicket('waiting'))
+  const changes = () => store.db.prepare('SELECT total_changes() AS count').get()!.count
+  const before = changes(), write = vi.spyOn(store, 'set')
+  const view = await fixture.view(), id = 'repository:acme/widgets'
+  expect(view).toEqual({ revision: 0, folders: [{ id, name: 'Acme/Widgets', automatic: true }], assignments: {
+    'c:/agent/state': id, 'd:/tasks/active': id, 'd:/tasks/ended': id,
+  } })
+  expect(await fixture.view()).toEqual(view)
+  expect(changes()).toBe(before)
+  expect(store.get(KV.workspaceFolders.state)).toBeUndefined()
+  expect(write).not.toHaveBeenCalled()
+  expect(fixture.action).not.toHaveBeenCalled()
+})
+
+it('creates empty folders and persists their names and canonical manual assignments across reopening', async () => {
+  const fixture = folderServer('')
+  expect(await fixture.view()).toEqual({ revision: 0, folders: [], assignments: {} })
+  const created = await fixture.call('POST', { action: 'create', name: '  Personal  ', revision: 0 })
+  expect(created.status).toBe(200)
+  const folder = (created.body as unknown as WorkspaceFoldersView).folders[0]!
+  expect(created.body).toEqual({ revision: 1, folders: [{ id: folder.id, name: 'Personal' }], assignments: {} })
+  expect((await fixture.call('POST', { action: 'assign', path: 'C:\\Work\\Project\\', folderId: folder.id, revision: 1 })).status).toBe(200)
+  expect((await fixture.call('POST', { action: 'rename', id: folder.id, name: 'Research', revision: 2 })).status).toBe(200)
+  fixture.reopen()
+  expect(await fixture.view()).toEqual({ revision: 3, folders: [{ id: folder.id, name: 'Research' }], assignments: { 'c:/work/project': folder.id } })
+})
+
+it('keeps manual grouping and explicit null overrides when new task workspaces appear', async () => {
+  const fixture = folderServer()
+  fixture.store.tickets.save(folderTicket('ended', 'D:\\Tasks\\Ended', true))
+  const created = await fixture.call('POST', { action: 'create', name: 'Review', revision: 0 })
+  const manual = (created.body as unknown as WorkspaceFoldersView).folders.find(folder => !folder.automatic)!.id
+  expect((await fixture.call('POST', { action: 'assign', path: 'D:/TASKS/ENDED/', folderId: manual, revision: 1 })).status).toBe(200)
+  expect((await fixture.call('POST', { action: 'assign', path: 'c:/AGENT/state/', folderId: null, revision: 2 })).status).toBe(200)
+  fixture.store.tickets.save(folderTicket('new', 'D:\\Tasks\\New'))
+  fixture.reopen()
+  expect((await fixture.view()).assignments).toEqual({ 'c:/agent/state': null, 'd:/tasks/ended': manual, 'd:/tasks/new': 'repository:acme/widgets' })
+  // Deleting the manual category leaves its task ungrouped instead of restoring automatic membership.
+  expect((await fixture.call('POST', { action: 'delete', id: manual, revision: 3 })).status).toBe(200)
+  expect((await fixture.view()).assignments['d:/tasks/ended']).toBeNull()
+})
+
+it('persists automatic renaming and deletion suppression without touching workspace files or tickets', async () => {
+  const fixture = folderServer(), directory = join(fixture.directory, 'workspace'), file = join(directory, 'keep.txt')
+  mkdirSync(directory); writeFileSync(file, 'keep this workspace')
+  const ticket = folderTicket('ended', directory, true), mode = statSync(directory).mode
+  fixture.store.tickets.save(ticket)
+  const automatic = 'repository:acme/widgets'
+  expect((await fixture.call('POST', { action: 'rename', id: automatic, name: 'Repository work', revision: 0 })).status).toBe(200)
+  fixture.reopen()
+  expect((await fixture.view()).folders).toEqual([{ id: automatic, name: 'Repository work', automatic: true }])
+  expect((await fixture.call('POST', { action: 'delete', id: automatic, revision: 1 })).status).toBe(200)
+  fixture.reopen()
+  fixture.store.tickets.save(folderTicket('future', 'D:\\Tasks\\Future'))
+  const suppressed = await fixture.view()
+  expect(suppressed.folders).toEqual([])
+  expect(suppressed.assignments[normalizeWorkspacePath(directory)]).toBeNull()
+  expect(suppressed.assignments['d:/tasks/future']).toBeUndefined()
+  expect(fixture.store.tickets.get(ticket.id)).toEqual(ticket)
+  expect(readFileSync(file, 'utf8')).toBe('keep this workspace')
+  expect(statSync(directory).mode).toBe(mode)
+  expect(fixture.action).not.toHaveBeenCalled()
+  // Explicit actions still work after suppressing the automatic group, including reusing its former name.
+  expect((await fixture.call('POST', { action: 'create', name: 'Repository work', revision: 2 })).status).toBe(200)
+  const manual = (await fixture.view()).folders[0]!
+  expect((await fixture.call('POST', { action: 'assign', path: directory, folderId: manual.id, revision: 3 })).status).toBe(200)
+  expect((await fixture.view()).assignments[normalizeWorkspacePath(directory)]).toBe(manual.id)
+})
+
+it('rejects invalid names, paths, unknown folders and stale revisions before any metadata write', async () => {
+  const fixture = folderServer(), write = vi.spyOn(fixture.store, 'set')
+  for (const body of [
+    { action: 'create', name: '' }, { action: 'create', name: '   ' }, { action: 'create', name: 'x'.repeat(81) },
+    { action: 'create', name: 'line\nbreak' }, { action: 'rename', id: 'repository:acme/widgets', name: '' },
+    { action: 'assign', path: 'x'.repeat(4097), folderId: null }, { action: 'assign', path: ' ', folderId: null },
+    { action: 'assign', path: 'C:/bad\u0000path', folderId: null }, { action: 'assign', path: 'C:/valid' },
+    { action: 'other' },
+  ]) expect((await fixture.call('POST', { ...body, revision: 0 })).status).toBe(400)
+  expect((await fixture.call('POST', { action: 'create', name: 'No revision' })).status).toBe(400)
+  expect((await fixture.call('POST', { action: 'create', name: 'Bad revision', revision: -1 })).status).toBe(400)
+  for (const body of [
+    { action: 'rename', id: 'missing', name: 'Missing' }, { action: 'delete', id: 'missing' },
+    { action: 'assign', path: 'C:/valid', folderId: 'missing' },
+  ]) expect((await fixture.call('POST', { ...body, revision: 0 })).status).toBe(404)
+  expect((await fixture.call('POST', { action: 'create', name: 'Future', revision: 1 })).status).toBe(409)
+  expect(write).not.toHaveBeenCalled()
+  const results = await Promise.all([
+    fixture.call('POST', { action: 'create', name: 'First', revision: 0 }),
+    fixture.call('POST', { action: 'create', name: 'Second', revision: 0 }),
+  ])
+  expect(results.map(result => result.status).sort()).toEqual([200, 409])
+  expect(write).toHaveBeenCalledTimes(1)
+  const saved = fixture.store.get(KV.workspaceFolders.state)
+  expect((await fixture.call('POST', { action: 'assign', path: 'C:/valid', folderId: null, revision: 0 })).status).toBe(409)
+  expect((await fixture.call('POST', { action: 'create', name: 'x'.repeat(32 * 1024), revision: 1 })).status).toBe(400)
+  expect(fixture.store.get(KV.workspaceFolders.state)).toEqual(saved)
+  expect(write).toHaveBeenCalledTimes(1)
 })
