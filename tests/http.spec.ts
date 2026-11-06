@@ -217,6 +217,47 @@ it('persists automatic renaming and deletion suppression without touching worksp
   expect((await fixture.view()).assignments[normalizeWorkspacePath(directory)]).toBe(manual.id)
 })
 
+it('persists manual and automatic folder ordering without changing assignments or automatic discovery', async () => {
+  const fixture = folderServer(), automatic = 'repository:acme/widgets'
+  fixture.store.tickets.save(folderTicket('task', 'D:/Task'))
+  await fixture.call('POST', { action: 'create', name: 'First', revision: 0 })
+  await fixture.call('POST', { action: 'create', name: 'Second', revision: 1 })
+  const original = await fixture.view(), [first, second] = original.folders.filter(folder => !folder.automatic)
+  const write = vi.spyOn(fixture.store, 'set')
+  for (const body of [
+    { action: 'reorder', id: automatic }, { action: 'reorder', id: '', beforeId: null },
+    { action: 'reorder', id: automatic, beforeId: '' },
+  ]) expect((await fixture.call('POST', { ...body, revision: 2 })).status).toBe(400)
+  for (const body of [
+    { id: 'missing', beforeId: null }, { id: first!.id, beforeId: 'missing' },
+  ]) expect((await fixture.call('POST', { action: 'reorder', ...body, revision: 2 })).status).toBe(404)
+  expect(write).not.toHaveBeenCalled()
+  expect((await fixture.call('POST', { action: 'reorder', id: automatic, beforeId: first!.id, revision: 2 })).status).toBe(200)
+  fixture.reopen()
+  let view = await fixture.view()
+  expect(view.folders.map(folder => folder.id)).toEqual([automatic, first!.id, second!.id])
+  expect(view.folders[0]!.automatic).toBe(true)
+  expect(view.assignments).toEqual(original.assignments)
+  expect((await fixture.call('POST', { action: 'reorder', id: first!.id, beforeId: null, revision: 3 })).status).toBe(200)
+  fixture.reopen()
+  view = await fixture.view()
+  expect(view.folders.map(folder => folder.id)).toEqual([automatic, second!.id, first!.id])
+  expect(view.assignments).toEqual(original.assignments)
+  // A stale drag cannot overwrite the newer order; a self-drop remains a harmless no-op.
+  expect((await fixture.call('POST', { action: 'reorder', id: first!.id, beforeId: automatic, revision: 3 })).status).toBe(409)
+  expect(await fixture.view()).toEqual(view)
+  expect((await fixture.call('POST', { action: 'reorder', id: second!.id, beforeId: second!.id, revision: 4 })).status).toBe(200)
+  expect((await fixture.view()).folders).toEqual(view.folders)
+  expect((await fixture.call('POST', { action: 'rename', id: automatic, name: 'Repository', revision: 5 })).status).toBe(200)
+  expect((await fixture.call('POST', { action: 'create', name: 'New folder', revision: 6 })).status).toBe(200)
+  fixture.store.tickets.save(folderTicket('new-task', 'D:/NewTask'))
+  fixture.reopen()
+  view = await fixture.view()
+  expect(view.folders.map(folder => folder.name)).toEqual(['Repository', 'Second', 'First', 'New folder'])
+  expect(view.assignments['d:/newtask']).toBe(automatic)
+  expect(fixture.action).not.toHaveBeenCalled()
+})
+
 it('rejects invalid names, paths, unknown folders and stale revisions before any metadata write', async () => {
   const fixture = folderServer(), write = vi.spyOn(fixture.store, 'set')
   for (const body of [

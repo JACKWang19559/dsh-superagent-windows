@@ -14,6 +14,7 @@ export type WorkspaceFolderAction = { revision: number } & (
   | { action: 'rename'; id: string; name: string }
   | { action: 'delete'; id: string }
   | { action: 'assign'; path: string; folderId: string | null }
+  | { action: 'reorder'; id: string; beforeId: string | null }
 )
 /** Only explicit choices are stored; automatically discovered workspaces are projected on every read. */
 export interface WorkspaceFolderMetadata extends WorkspaceFoldersView { suppressedAutomatic: string[] }
@@ -32,6 +33,7 @@ const Action = z.discriminatedUnion('action', [
   z.object({ action: z.literal('create'), name, revision }),
   z.object({ action: z.literal('rename'), id, name, revision }),
   z.object({ action: z.literal('delete'), id, revision }),
+  z.object({ action: z.literal('reorder'), id, beforeId: id.nullable(), revision }),
   z.object({ action: z.literal('assign'), path: z.string().min(1).max(4096)
     .regex(/^[^\u0000-\u001f\u007f]*$/, 'Workspace paths cannot contain control characters')
     .refine(value => !!value.trim(), 'Workspace path is required'), folderId: id.nullable(), revision }),
@@ -83,6 +85,17 @@ export function updateWorkspaceFolders(metadata: WorkspaceFolderMetadata | undef
       // Preserve ungrouping even if one of these paths also belongs to the automatically discovered repository group.
       next.assignments = { ...next.assignments, ...Object.fromEntries(Object.entries(view.assignments)
         .filter(([, id]) => id === folder.id).map(([path]) => [path, null])) }
+      break
+    }
+    case 'reorder': {
+      const folder = lookup(request.id)
+      if (request.beforeId !== null) lookup(request.beforeId)
+      // Save the displayed order, including the derived repository folder, without changing membership.
+      const ordered = view.folders.filter(item => item.id !== folder.id)
+      const at = request.beforeId === folder.id ? view.folders.findIndex(item => item.id === folder.id)
+        : request.beforeId === null ? ordered.length : ordered.findIndex(item => item.id === request.beforeId)
+      ordered.splice(at, 0, folder)
+      next.folders = ordered
       break
     }
     case 'assign':

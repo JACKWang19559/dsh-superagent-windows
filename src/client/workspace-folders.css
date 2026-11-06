@@ -11,6 +11,10 @@
 .dt-folder-heading { display: flex; flex: none; align-items: center; min-height: 32px; gap: 2px; padding: 4px 2px 0; color: var(--dsw-alias-label-secondary); }
 .dt-folder-toggle { display: flex; flex: 1; min-width: 0; align-items: center; gap: 7px; padding: 5px 4px; border: 0; border-radius: 6px; background: transparent; color: inherit; text-align: left; font: inherit; font-size: 12px; line-height: 20px; cursor: pointer; }
 .dt-folder-toggle svg { flex: none; }
+.dt-folder-toggle[draggable="true"] { cursor: grab; }
+.dt-folder-heading[data-dragging="true"] { opacity: .5; }
+.dt-folder-heading[data-drop="inside"] { border-radius: 6px; background: var(--dsw-alias-interactive-bg-hover); outline: 1px solid var(--dsw-alias-brand-primary); outline-offset: -1px; }
+.dt-folder-insertion { height: 2px; flex: none; margin: -1px 4px; border-radius: 2px; background: var(--dsw-alias-brand-primary); pointer-events: none; }
 .dt-folder-chevron { display: inline-flex; }
 .dt-folder-closed { transform: rotate(-90deg); }
 .dt-folder-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }

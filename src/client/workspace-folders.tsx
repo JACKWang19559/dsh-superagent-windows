@@ -16,6 +16,12 @@ type WithoutRevision<T> = T extends unknown ? Omit<T, 'revision'> : never
 type FolderEdit = WithoutRevision<WorkspaceFolderAction>
 const COLLAPSED_KEY = 'dsh-superagent.workspace-folders.collapsed'
 const DRAG_TYPE = 'application/x-dsh-superagent-workspace'
+const FOLDER_DRAG_TYPE = 'application/x-dsh-superagent-folder'
+type DropHint = { id: string; edge: 'before' | 'after' | 'inside' }
+const dropEdge = (event: DragEvent, id: string) => {
+  const rect = event.currentTarget.getBoundingClientRect()
+  return id && event.clientY >= rect.top + rect.height / 2 ? 'after' : 'before'
+}
 function loadCollapsed(): Set<string> {
   try {
     const value: unknown = JSON.parse(localStorage.getItem(COLLAPSED_KEY) ?? '[]')
@@ -42,19 +48,23 @@ export function WorkspaceFolders({ useWorkspaces, t }: WorkspaceFoldersProps) {
   const [open, setOpen] = useState(false), [name, setName] = useState('')
   const [names, setNames] = useState<Record<string, string>>({}), [deleting, setDeleting] = useState<string>()
   const [busy, setBusy] = useState(false), [failure, setFailure] = useState<string>()
-  const writing = useRef(false), dragging = useRef<string>()
+  const writing = useRef(false), dragging = useRef<string>(), draggingFolder = useRef<string>()
+  const [folderDrag, setFolderDrag] = useState<string>(), [dropHint, setDropHint] = useState<DropHint>()
   const [collapsed, setCollapsed] = useState(loadCollapsed)
+  const clearDrag = () => {
+    dragging.current = undefined; draggingFolder.current = undefined
+    setFolderDrag(undefined); setDropHint(undefined)
+  }
   useEffect(() => observeWorkspaceFolders(setMounts), [])
   useEffect(() => {
     const start = (event: globalThis.DragEvent) => {
-      dragging.current = undefined
+      clearDrag()
       const row = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-row-key^="workspace:"]') : null
       const workspace = workspaces.find(item => item.workspaceId === row?.dataset.rowKey?.slice('workspace:'.length))
       if (workspace) { dragging.current = workspace.path; event.dataTransfer?.setData(DRAG_TYPE, workspace.path) }
     }
-    const end = () => { dragging.current = undefined }
-    document.addEventListener('dragstart', start, true); document.addEventListener('dragend', end, true)
-    return () => { document.removeEventListener('dragstart', start, true); document.removeEventListener('dragend', end, true) }
+    document.addEventListener('dragstart', start, true); document.addEventListener('dragend', clearDrag, true)
+    return () => { document.removeEventListener('dragstart', start, true); document.removeEventListener('dragend', clearDrag, true) }
   }, [workspaces])
   const sections = useMemo(() => {
     if (!view) return []
@@ -72,7 +82,7 @@ export function WorkspaceFolders({ useWorkspaces, t }: WorkspaceFoldersProps) {
   useLayoutEffect(() => {
     if (!view || !mounts.tree) return
     const membership = new Map<string, { order: number; hidden: boolean }>()
-    sections.forEach((folder, index) => folder.members.forEach(id => membership.set(id, { order: index * 2 + 1,
+    sections.forEach((folder, index) => folder.members.forEach(id => membership.set(id, { order: index * 4 + 1,
       hidden: !mounts.searching && collapsed.has(folder.id) })))
     return arrangeWorkspaceFolders(mounts, membership)
   }, [view, mounts, sections, collapsed])
@@ -100,27 +110,66 @@ export function WorkspaceFolders({ useWorkspaces, t }: WorkspaceFoldersProps) {
     event.preventDefault()
     if (name.trim() && await mutate({ action: 'create', name: name.trim() })) setName('')
   }
+  const dragOver = (event: DragEvent, folderId: string) => {
+    if (writing.current) return
+    const isFolder = !!draggingFolder.current || event.dataTransfer.types.includes(FOLDER_DRAG_TYPE)
+    if (!isFolder && !dragging.current && !event.dataTransfer.types.includes(DRAG_TYPE)) return
+    event.preventDefault(); event.stopPropagation(); event.dataTransfer.dropEffect = 'move'
+    const hint: DropHint | undefined = isFolder && draggingFolder.current === folderId ? undefined
+      : { id: folderId, edge: isFolder ? dropEdge(event, folderId) : 'inside' }
+    setDropHint(previous => previous?.id === hint?.id && previous?.edge === hint?.edge ? previous : hint)
+  }
   const drop = (event: DragEvent, folderId: string) => {
+    if (!view || writing.current) return
+    const moved = event.dataTransfer.getData(FOLDER_DRAG_TYPE) || draggingFolder.current
+    if (moved) {
+      event.preventDefault(); event.stopPropagation(); clearDrag()
+      if (moved === folderId || !view.folders.some(item => item.id === moved)) return
+      const ids = view.folders.filter(item => item.id !== moved).map(item => item.id)
+      if (folderId && !ids.includes(folderId)) return
+      const beforeId = !folderId ? null : dropEdge(event, folderId) === 'before' ? folderId
+        : ids[ids.indexOf(folderId) + 1] ?? null
+      ids.splice(beforeId === null ? ids.length : ids.indexOf(beforeId), 0, moved)
+      if (ids.every((id, index) => view.folders[index]?.id === id)) return
+      void mutate({ action: 'reorder', id: moved, beforeId })
+      return
+    }
     const path = event.dataTransfer.getData(DRAG_TYPE) || dragging.current
     if (!path || !workspaces.some(item => item.path === path)) return
-    event.preventDefault(); event.stopPropagation(); dragging.current = undefined
+    event.preventDefault(); event.stopPropagation(); clearDrag()
     void mutate({ action: 'assign', path, folderId: folderId || null })
   }
+  const insertion = dropHint && dropHint.edge !== 'inside' ? sections.findIndex(folder => folder.id === dropHint.id) : -1
   return <>
     <style>{BASE_STYLES}{STYLES}</style>
     {mounts.header && createPortal(<button className="dt-folder-icon" type="button" aria-label={t('foldersCreate')}
       title={t('foldersCreate')} onClick={() => setOpen(true)}><FolderIcon plus /></button>, mounts.header)}
-    {mounts.folders && view && createPortal(sections.map((folder, index) => <div className="dt-folder-heading"
-      data-superagent-folder={folder.id || 'ungrouped'} key={folder.id} style={{ order: index * 2 }}
-      onDragOver={event => { if (dragging.current || event.dataTransfer.types.includes(DRAG_TYPE)) { event.preventDefault(); event.dataTransfer.dropEffect = 'move' } }}
+    {mounts.folders && view && createPortal(<>{sections.map((folder, index) => <div className="dt-folder-heading"
+      data-superagent-folder={folder.id || 'ungrouped'} key={folder.id} style={{ order: index * 4 }}
+      data-dragging={folderDrag === folder.id || undefined} data-drop={dropHint?.id === folder.id ? dropHint.edge : undefined}
+      onDragOver={event => dragOver(event, folder.id)}
+      onDragLeave={event => {
+        if (event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget)) return
+        setDropHint(previous => previous?.id === folder.id ? undefined : previous)
+      }}
       onDrop={event => drop(event, folder.id)}>
-      <button className="dt-folder-toggle" type="button" aria-expanded={mounts.searching || !collapsed.has(folder.id)} title={folder.name}
-        disabled={mounts.searching} onClick={() => toggle(folder.id)}>
+      <button className="dt-folder-toggle" type="button" aria-expanded={mounts.searching || !collapsed.has(folder.id)}
+        title={folder.id ? t('foldersDragTitle', { name: folder.name }) : folder.name}
+        disabled={mounts.searching} onClick={() => toggle(folder.id)} draggable={!!folder.id && !busy}
+        onDragStart={event => {
+          if (!folder.id || writing.current) { event.preventDefault(); return }
+          event.stopPropagation(); event.dataTransfer.effectAllowed = 'move'
+          event.dataTransfer.setData(FOLDER_DRAG_TYPE, folder.id)
+          draggingFolder.current = folder.id; setFolderDrag(folder.id)
+        }}>
         <span className={!mounts.searching && collapsed.has(folder.id) ? 'dt-folder-chevron dt-folder-closed' : 'dt-folder-chevron'}><Icon name="chevron-down" size={12} /></span>
         <FolderIcon /><span className="dt-folder-name">{folder.name}</span><span className="dt-folder-count">{folder.members.length}</span>
       </button>
       <button className="dt-folder-icon" type="button" aria-label={t('foldersManage')} title={t('foldersManage')} onClick={() => setOpen(true)}><Icon name="settings" size={13} /></button>
-    </div>), mounts.folders)}
+    </div>)}
+    {insertion >= 0 && <div className="dt-folder-insertion" aria-hidden="true"
+      style={{ order: insertion * 4 + (dropHint?.edge === 'after' ? 3 : -1) }} />}
+    </>, mounts.folders)}
     <Modal open={open} onClose={() => { if (!busy) setOpen(false) }} title={t('foldersTitle')} closeLabel={t('close')}
       description={t('foldersHint')} className="dt-folders-modal">
       {(failure || error) && <p className="dt-error" role="alert">{failure ?? errorText(error)}</p>}
